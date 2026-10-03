@@ -6,3 +6,4 @@ relay.toml
 printers.toml
 .env
 raw/
+.ruff_cache/

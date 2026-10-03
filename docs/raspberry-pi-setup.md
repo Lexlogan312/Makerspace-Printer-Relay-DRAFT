@@ -176,9 +176,10 @@ TLS connection to Supabase both depend on the correct time. If it says no, ask I
 NTP server and set it in `/etc/systemd/timesyncd.conf`.
 
 If you set up Wi-Fi in Imager (step 1), remove it now so `wlan0` is free for the hotspot.
-Current Raspberry Pi OS images apply Imager's Wi-Fi through cloud-init and netplan, which
-recreate it on every boot. So turn cloud-init off (first-boot setup is finished) and take the
-Wi-Fi out of the netplan file.
+Current Raspberry Pi OS images apply Imager's settings with cloud-init, which can re-apply
+them, so turn it off (first-boot setup is finished), then delete every Wi-Fi profile.
+NetworkManager stores each profile as a file in `/etc/netplan/` (`90-NM-<id>.yaml`) and
+deletes the file along with the profile.
 
 > **Don't cut off your own connection.** If you're SSH'd in over that Wi-Fi, deleting it
 > disconnects you. First get the Pi's campus IP with `ip -4 addr show eth0` (or `wlan1`), check
@@ -191,13 +192,12 @@ Wi-Fi out of the netplan file.
 
 ```bash
 sudo touch /etc/cloud/cloud-init.disabled     # stop first-boot setup from re-applying anything
-ls /etc/netplan/                              # usually 50-cloud-init.yaml
-sudo nano /etc/netplan/50-cloud-init.yaml     # delete the whole `wifis:` section, keep `ethernets:`
-sudo netplan apply
-nmcli con show                                # no wlan0 profiles should be left
+nmcli -f NAME,UUID,TYPE con show              # note which entry is the Ethernet one
+# delete every Wi-Fi profile (by id, so odd characters in names don't matter). Ethernet is untouched
+nmcli -t -f UUID,TYPE con show | awk -F: '$2=="802-11-wireless"{print $1}' | xargs -r -n1 sudo nmcli con delete uuid
+nmcli con show                                # only the Ethernet profile and lo should be left
+ls /etc/netplan/                              # one 90-NM-... file left: the Ethernet profile
 ```
-
-On older images the Wi-Fi is a plain NetworkManager profile instead: `sudo nmcli con delete preconfigured`.
 
 ## 6. Choose a hotspot channel
 
@@ -259,13 +259,18 @@ Supabase yet shows up in the `discovered_printers` table, ready to add from the 
 > printer's firmware may be restricting LAN access. Turn on **Developer Mode** (next to LAN Only
 > Mode in the printer's settings). The makerspace's A1s on firmware 01.08 haven't needed this.
 
+> **Hotspot capacity.** The Pi's built-in Wi-Fi may only handle around 8–10 devices at once in
+> hotspot mode. Four printers are fine. If some printers fail to join as more are added, use a USB
+> Wi-Fi adapter that supports more devices in hotspot mode (or a standalone offline router) for the
+> printer network. That's the contingency in the project proposal.
+
 ### Optional: fixed IPs
 
 Not required, but it gives each printer a predictable IP, which helps when troubleshooting. Once the
 printers have joined, list them:
 
 ```bash
-cat /var/lib/NetworkManager/dnsmasq-wlan0.leases
+sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases
 ```
 
 Each line shows an expiry time, MAC address, IP and hostname. Create
@@ -338,7 +343,9 @@ nmcli con show --active
 ```
 
 Both services should be active, and `printer-ap` plus the campus connection should both be
-listed. Also confirm the dashboard data is updating.
+listed. The printers take **about 1–2 minutes** to rejoin the hotspot after the Pi restarts (they
+wait before retrying Wi-Fi), so they show offline briefly. Check
+`journalctl -u printer-relay -b --no-pager | tail` for them reconnecting.
 
 Optional but recommended: turn on automatic security updates with
 `sudo apt install -y unattended-upgrades`.
@@ -352,7 +359,7 @@ Optional but recommended: turn on automatic security updates with
 | Live logs | `journalctl -u printer-relay -f` |
 | Restart after editing `relay.toml` | `sudo systemctl restart printer-relay` |
 | Update the code (git) | `cd ~/printer-relay && git pull && uv sync && sudo systemctl restart printer-relay` |
-| See which printers are on the hotspot | `cat /var/lib/NetworkManager/dnsmasq-wlan0.leases` |
+| See which printers are on the hotspot | `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases` |
 | Add a printer | Join it to the hotspot (step 8). It appears in `discovered_printers`. Add it with its label and access code in the admin dashboard. The relay connects within 30 s, no restart needed |
 | Remove a printer | Set its `maintenance_status` to `offline_permanent` in the dashboard. This keeps its history (deleting the row erases it) |
 
@@ -369,3 +376,5 @@ Optional but recommended: turn on automatic security updates with
 | `Supabase … failed` with a connection error | Campus uplink is down. Try `ping supabase.com` and `nmcli device` |
 | Timestamps are wrong or TLS errors | Clock not synced. Check `timedatectl` (step 5) |
 | Printers can't see `MakerspacePrinters` | Hotspot must be 2.4 GHz (`band bg`). Try another channel |
+| All printers offline right after a Pi restart | Normal for 1–2 minutes while they rejoin the hotspot |
+| Pi won't join a phone hotspot during setup (step 1) | Imager mis-saves names with a curly apostrophe (e.g. "Alex’s iPhone"), and iPhones may hide the hotspot name. Use Ethernet instead |

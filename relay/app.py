@@ -354,8 +354,10 @@ class Relay:
     # 7. heartbeat
 
     def _heartbeat(self) -> None:
+        starting = self.clock() - self.started < STARTUP_GRACE_S
         self.db.insert_heartbeat({
-            "printers_online": sum(1 for c in self.conns.values() if c.is_connected),
+            # Unknown while connections are still coming up, rather than a misleading 0
+            "printers_online": None if starting else sum(1 for c in self.conns.values() if c.is_connected),
             "max_push_latency_ms": round(max(self.latencies) * 1000) if self.latencies else None,
         })
         self.latencies.clear()

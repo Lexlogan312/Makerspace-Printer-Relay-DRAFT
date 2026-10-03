@@ -229,12 +229,14 @@ def test_heartbeat_once_per_minute_in_second_half():
     clock.advance(2)
     relay.tick()
     assert len(db.written("insert_heartbeat")) == 1
+    assert db.written("insert_heartbeat")[0][0]["printers_online"] is None  # still starting up
     clock.advance(20)   # 14:01:02, first half of the next minute
     relay.tick()
     assert len(db.written("insert_heartbeat")) == 1
     clock.advance(30)   # 14:01:32
     relay.tick()
     assert len(db.written("insert_heartbeat")) == 2
+    assert db.written("insert_heartbeat")[1][0]["printers_online"] == 0  # past start-up: a real count
 
 
 def test_connection_problem_messages():

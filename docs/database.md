@@ -48,8 +48,9 @@ Its print jobs are kept (with `printer_id` set to null) so fleet totals stay cor
 
 Bambu's LAN reports have no job id or start time, so jobs come from `gcode_state`:
 - A job **starts** when the printer enters `PREPARE`, `SLICING`, `RUNNING` or `PAUSE`.
-- It **ends** when the printer leaves those states: `FINISH` → `finished`, `FAILED` → `failed`
-  (a cancelled print most likely shows up here too. A test cancel will confirm it), and anything else → `unknown`.
+- It **ends** when the printer leaves those states: `FINISH` → `finished`, `FAILED` → `failed`,
+  `FAILED` with error `0300-400C` → `cancelled` (the print was cancelled, not a printer problem),
+  and anything else → `unknown`.
 - **Times** are when the relay saw the change, accurate to a few seconds.
 - **Gaps:**
   - If a printer drops off Wi-Fi briefly mid-print, the job continues, and ends when the printer
@@ -73,9 +74,9 @@ Every stat uses full 24-hour days in the `America/New_York` time zone (set in
 | `printer_utilization_daily` | day, printer_id, printer_label, printing_hours, utilization_percent | Hours printing ÷ 24, per printer |
 | `fleet_utilization_daily` | day, printing_hours, printer_count, utilization_percent | Same for all printers (÷ 24 × printers not retired) |
 | `busy_hours_daily` | day, weekday (1 = Mon), hour, busy_printers | Average printers printing in that hour. Average over weeks for the heatmap |
-| `print_jobs_daily` | day, printer_id, printer_label, jobs_started, finished, failed, unknown, in_progress, avg_finished_minutes | Job counts and success rate |
+| `print_jobs_daily` | day, printer_id, printer_label, jobs_started, finished, failed, unknown, in_progress, avg_finished_minutes, cancelled | Job counts and success rate |
 | `filament_usage_daily` | day, filament_type, color_name, jobs, printing_hours | Which filament gets used |
-| `printer_reliability_daily` | day, printer_id, printer_label, offline_hours, errors | Printers that may need maintenance |
+| `printer_reliability_daily` | day, printer_id, printer_label, offline_hours, errors (cancellations excluded) | Printers that may need maintenance |
 | `relay_uptime_daily` | day, minutes_up, minutes_total, uptime_percent, max_latency_ms, p95_latency_ms, avg_printers_online | The >95% uptime and <10 s latency goals |
 | `print_job_hours` | job_id, printer_id, printer_label, day, weekday, hour, hours | Building block for the views above |
 

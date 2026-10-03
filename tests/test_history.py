@@ -34,6 +34,14 @@ def test_print_lifecycle_creates_one_job():
     assert h.job is None
 
 
+def test_cancelled_print_is_not_a_failure():
+    h = PrinterHistory(PRINTER.id, {"is_online": True, "gcode_state": "RUNNING", "print_error": 0})
+    h.observe(record("RUNNING"), T[0])
+    events, jobs = h.observe(record("FAILED", print_error=0x0300400C), T[1])
+    assert ("error", None, "0300-400C") in kinds(events)
+    assert jobs[0]["outcome"] == "cancelled"
+
+
 def test_failed_print_records_error():
     h = PrinterHistory(PRINTER.id, {"is_online": True, "gcode_state": "RUNNING", "print_error": 0})
     h.observe(record("RUNNING"), T[0])

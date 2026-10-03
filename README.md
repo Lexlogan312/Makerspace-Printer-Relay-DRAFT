@@ -22,7 +22,8 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
 1. **Database.** In the Supabase SQL editor, run these in order (each is safe to re-run):
    [sql/01_public_read.sql](sql/01_public_read.sql),
    [sql/02_admin_discovery_history.sql](sql/02_admin_discovery_history.sql),
-   [sql/03_cleanup.sql](sql/03_cleanup.sql).
+   [sql/03_cleanup.sql](sql/03_cleanup.sql),
+   [sql/04_cancelled_prints.sql](sql/04_cancelled_prints.sql).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:
