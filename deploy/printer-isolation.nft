@@ -1,0 +1,30 @@
+#!/usr/sbin/nft -f
+# Keeps the printer hotspot (wlan0) isolated:
+#  - nothing is forwarded to or from it, so printers have no internet, and campus devices
+#    can't reach printers through the Pi
+#  - printers can only reach the Pi for DHCP, DNS, ping and their discovery announcements
+#    (UDP 2021), not SSH or anything else
+# The Pi itself can still open connections to the printers (the relay's MQTT).
+# This table is separate from NetworkManager's rules. A drop here wins even if
+# NetworkManager's hotspot rules accept the same packet.
+
+table inet printer_isolation
+delete table inet printer_isolation
+
+table inet printer_isolation {
+    chain forward {
+        type filter hook forward priority filter - 10; policy accept;
+        iifname "wlan0" drop
+        oifname "wlan0" drop
+    }
+
+    chain input {
+        type filter hook input priority filter - 10; policy accept;
+        iifname != "wlan0" accept
+        ct state established,related accept
+        udp dport { 53, 67, 2021 } accept
+        tcp dport 53 accept
+        icmp type echo-request accept
+        drop
+    }
+}

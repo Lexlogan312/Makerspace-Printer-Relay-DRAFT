@@ -1,0 +1,20 @@
+# Copy to relay.toml and fill in. relay.toml is gitignored.
+# Printers aren't listed here. They're managed in Supabase (the admin dashboard).
+
+[supabase]
+# Project Settings > Data API > Project URL
+url = ""
+# Project Settings > API Keys > Secret keys (sb_secret_...). Never the publishable key,
+# and never put this key in the frontend. SUPABASE_URL / SUPABASE_KEY env vars override these.
+key = ""
+
+[relay]
+# Only accept printer announcements from this network. On the Pi, use the hotspot's
+# network so printers elsewhere on campus are ignored. Leave empty on a Mac for testing.
+printer_network = ""          # Pi: "10.42.0.0/24"
+
+push_interval_s = 2              # main loop: push changes this often
+status_heartbeat_s = 30          # re-send unchanged printer status this often
+printer_sync_interval_s = 30     # pick up admin changes to printers this often
+request_full_status = true       # ask printers for a full report ("pushall") on connect
+full_status_interval_s = 300     # ...and this often

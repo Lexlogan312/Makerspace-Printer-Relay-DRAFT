@@ -1,0 +1,22 @@
+# Installed by docs/raspberry-pi-setup.md (step 9). __USER__ is replaced with the Pi login user.
+[Unit]
+Description=Makerspace printer relay (Bambu printers -> Supabase)
+Wants=network-online.target
+After=network-online.target printer-isolation.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=/home/__USER__/printer-relay
+ExecStart=/home/__USER__/printer-relay/.venv/bin/python -m relay --config relay.toml
+Restart=always
+RestartSec=10
+
+# Hardening: the relay only needs to read its own directory and make network connections.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

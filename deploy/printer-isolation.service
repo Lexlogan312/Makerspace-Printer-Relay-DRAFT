@@ -1,0 +1,15 @@
+# Installed by docs/raspberry-pi-setup.md (step 7). Loads the printer-hotspot firewall before networking starts.
+[Unit]
+Description=Firewall isolating the printer hotspot
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/printer-isolation.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
