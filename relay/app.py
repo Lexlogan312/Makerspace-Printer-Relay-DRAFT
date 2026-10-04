@@ -303,10 +303,22 @@ class Relay:
                 # From the first report after the previous push, so it's an upper bound.
                 self.latencies.append(max(0.0, done - since))
         for record, _, _ in to_send:
-            if record["filament_color"]:
-                pid = record["printer_id"]
-                self._update_if_changed(pid, "filament_color", self.printers[pid].filament_color,
-                                        record["filament_color"], self.db.update_printer)
+            self._update_filament(record)
+
+    def _update_filament(self, record: dict) -> None:
+        """Keep the printers table's loaded-filament columns current, in one write when any change.
+        Values the printer didn't report are left alone (unknown isn't the same as "nothing loaded")."""
+        pid = record["printer_id"]
+        p = self.printers[pid]
+        changed = {}
+        for column in ("filament_color", "filament_color_name", "filament_type"):
+            value = record[column]
+            if value is not None and value != self.written.get((pid, column), getattr(p, column)):
+                changed[column] = value
+        if changed:
+            self.db.update_printer(pid, changed)
+            for column, value in changed.items():
+                self.written[(pid, column)] = value
 
     def _record_history(self, p: Printer, record: dict, wall: datetime) -> None:
         events, jobs = self.histories[p.id].observe(record, wall)

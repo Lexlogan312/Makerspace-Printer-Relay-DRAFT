@@ -134,7 +134,7 @@ class PrinterHistory:
                     "outcome": None,
                     "filament_type": record["filament_type"],
                     "filament_color": record["filament_color"],
-                    "filament_color_name": color_name(record["filament_color"]),
+                    "filament_color_name": record["filament_color_name"],
                     "print_error": 0,
                 }
                 rows.append(dict(self.job))

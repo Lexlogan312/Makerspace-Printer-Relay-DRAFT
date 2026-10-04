@@ -1,5 +1,6 @@
 """Turn a printer's raw merged MQTT state into the flat record the dashboard uses."""
 
+import colorsys
 from datetime import datetime, timedelta, timezone
 
 from .config import Printer
@@ -110,6 +111,7 @@ def build_status(printer: Printer, state: dict, connected: bool,
         "bed_target": _round(p.get("bed_target_temper")),
         "filament_type": active.get("tray_type") or None,
         "filament_color": _hex_color(active.get("tray_color")),
+        "filament_color_name": color_name(_hex_color(active.get("tray_color"))),
         "print_error": _int(p.get("print_error")) or 0,
         "wifi_signal": p.get("wifi_signal") or None,
         "last_seen": _iso(last_seen),
@@ -123,35 +125,75 @@ def fingerprint(record: dict) -> tuple:
     )
 
 
-# Reference colors for grouping filament in analytics. Different presets give slightly
-# different hex codes for the "same" color, so each code gets the name of the closest one.
-NAMED_COLORS = {
-    "white": (255, 255, 255),
-    "silver": (192, 192, 192),
-    "gray": (128, 128, 128),
-    "black": (0, 0, 0),
-    "red": (200, 30, 35),
-    "orange": (255, 120, 20),
-    "yellow": (250, 215, 30),
-    "green": (40, 160, 70),
-    "blue": (30, 80, 200),
-    "light blue": (120, 190, 230),
-    "purple": (120, 60, 160),
-    "pink": (245, 140, 180),
-    "brown": (120, 75, 40),
-    "beige": (230, 210, 170),
+# Elegoo PLA colors, the filament the makerspace stocks (hex values from Elegoo's store).
+# Analytics groups jobs by these names.
+FILAMENT_COLORS = {
+    "Black": "#000000", "White": "#FFFFFF", "Grey": "#8F949B", "Space Grey": "#7E7E7E",
+    "Translucent": "#FDFCF1", "Red": "#EA140E", "Orange": "#FD7C18", "Yellow": "#FBEC07",
+    "Neon Green": "#08E327", "Sea Green": "#08B690", "Sky Blue": "#32D0EC", "Dark Blue": "#2240AF",
+    "Purple": "#603BA0", "Pink": "#F9B0BD", "Brown": "#9E6A4B", "Copper Filled": "#895837",
+    "Wood Color": "#B19870", "Beige": "#F4E0B8",
 }
+# Only used on an exact match, so e.g. an off-white isn't called "Translucent" and
+# greys don't split between two near-identical names.
+EXACT_ONLY = {"Translucent", "Copper Filled", "Space Grey"}
+
+# Hue bands on the color wheel (degrees) for colorful filament, checked in order.
+HUE_FAMILIES = [(15, "red"), (45, "orange"), (70, "yellow"), (170, "green"), (200, "light blue"),
+                (250, "blue"), (290, "purple"), (345, "pink"), (360, "red")]
+
+
+def _rgb(hex_color: str | None) -> tuple[int, int, int] | None:
+    if not hex_color or len(hex_color) != 7 or not hex_color.startswith("#"):
+        return None
+    try:
+        return tuple(int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return None
+
+
+def color_family(rgb: tuple[int, int, int]) -> str:
+    """Broad color family from hue, saturation and brightness (HSV). Raw RGB distance
+    isn't used here, because dark colors like dark green are numerically close to black."""
+    hue, sat, val = colorsys.rgb_to_hsv(*(c / 255 for c in rgb))
+    hue *= 360
+    if val < 0.18:
+        return "black"
+    if sat < 0.15:  # hardly any color: white, grey or black
+        return "white" if val > 0.9 else "grey" if val > 0.3 else "black"
+    if 15 <= hue < 60 and sat < 0.4 and val > 0.6:
+        return "beige"   # pale or tan orange/yellow
+    if 10 <= hue < 45 and val < 0.65:
+        return "brown"   # dark orange
+    if (hue >= 330 or hue < 15) and sat < 0.7 and val > 0.7:
+        return "pink"    # light, softer red
+    return next(family for limit, family in HUE_FAMILIES if hue < limit)
+
+
+_FAMILY_CHOICES: dict[str, list[tuple[str, tuple[int, int, int]]]] = {}
+for _name, _hex in FILAMENT_COLORS.items():
+    if _name not in EXACT_ONLY:
+        _rgb_value = _rgb(_hex)
+        _FAMILY_CHOICES.setdefault(color_family(_rgb_value), []).append((_name, _rgb_value))
 
 
 def color_name(hex_color: str | None) -> str | None:
-    """'#FF6A13' -> 'orange' (closest entry in NAMED_COLORS)."""
-    if not hex_color or len(hex_color) != 7:
+    """The filament color name for analytics, e.g. '#32D0EC' -> 'Sky Blue'.
+
+    An exact Elegoo color gets its own name. Anything else gets the closest Elegoo color
+    in the same color family, so '#104831' (a dark green) -> 'Sea Green', not 'Black'.
+    """
+    rgb = _rgb(hex_color)
+    if rgb is None:
         return None
-    try:
-        rgb = tuple(int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-    except ValueError:
-        return None
-    return min(NAMED_COLORS, key=lambda name: sum((a - b) ** 2 for a, b in zip(rgb, NAMED_COLORS[name], strict=True)))
+    for name, known in FILAMENT_COLORS.items():
+        if hex_color.upper() == known:
+            return name
+    family = color_family(rgb)
+    choices = _FAMILY_CHOICES.get(family)
+    if not choices:
+        return family.title()
+    return min(choices, key=lambda c: sum((a - b) ** 2 for a, b in zip(rgb, c[1], strict=True)))[0]
 
 
 def format_status_line(r: dict) -> str:

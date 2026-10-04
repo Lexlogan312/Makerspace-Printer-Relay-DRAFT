@@ -1,5 +1,5 @@
 from relay.printer import deep_merge
-from relay.status import build_status, color_name, fingerprint
+from relay.status import FILAMENT_COLORS, build_status, color_name, fingerprint
 from tests.fixtures import NOW, PRINTER, PRINTING
 
 def test_printing_record():
@@ -46,12 +46,28 @@ def test_fingerprint_ignores_wifi_jitter():
     assert fingerprint(a) == fingerprint(b)
 
 
-def test_color_names_group_similar_colors():
-    # Real Bambu filament colors (including two from the makerspace printers)
-    assert color_name("#FFFFFF") == "white"
-    assert color_name("#000000") == "black"
-    assert color_name("#FF6A13") == "orange"   # Bambu PLA Basic Orange
-    assert color_name("#0A2989") == "blue"     # Bambu PLA Basic Blue
-    assert color_name("#C12E1F") == "red"
-    assert color_name("#8E9089") == "gray"
+def test_every_elegoo_color_gets_its_own_name():
+    for name, hex_ in FILAMENT_COLORS.items():
+        assert color_name(hex_) == name
+        assert color_name(hex_.lower()) == name
+
+
+def test_other_colors_get_the_closest_elegoo_color_in_their_family():
+    cases = {
+        # Colors reported by the makerspace printers
+        "#FF6A13": "Orange", "#FF6910": "Orange",
+        "#104831": "Sea Green",   # dark green: plain closest-color matching said black
+        # Near-misses of each family
+        "#0A2989": "Dark Blue", "#000080": "Dark Blue", "#C12E1F": "Red", "#F4EE2A": "Yellow",
+        "#00AE42": "Neon Green", "#22FF22": "Neon Green", "#5E43B7": "Purple", "#F55A74": "Pink",
+        "#8BD5EE": "Sky Blue", "#9D432C": "Brown", "#E8D3A9": "Beige", "#B8A07A": "Wood Color",
+        "#8E9089": "Grey", "#F0F0F0": "White", "#1A1A1A": "Black",
+    }
+    assert {hex_: color_name(hex_) for hex_ in cases} == cases
+
+
+def test_specialty_colors_need_an_exact_match():
+    assert color_name("#FDFCF2") == "White"      # not Translucent
+    assert color_name("#7E7E7F") == "Grey"       # not Space Grey
+    assert color_name("#895838") == "Brown"      # not Copper Filled
     assert color_name(None) is None and color_name("nope") is None

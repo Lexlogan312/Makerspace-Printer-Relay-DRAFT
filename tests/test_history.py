@@ -30,7 +30,7 @@ def test_print_lifecycle_creates_one_job():
     assert jobs[0]["id"] == job_id and jobs[0]["outcome"] == "finished"
     assert jobs[0]["started_at"] == T[0].isoformat(timespec="seconds")
     assert jobs[0]["ended_at"] == T[3].isoformat(timespec="seconds")
-    assert jobs[0]["filament_type"] == "PETG" and jobs[0]["filament_color_name"] == "orange"
+    assert jobs[0]["filament_type"] == "PETG" and jobs[0]["filament_color_name"] == "Orange"
     assert h.job is None
 
 

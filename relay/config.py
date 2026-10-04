@@ -19,6 +19,8 @@ class Printer:
     host: str | None = None             # last known IP. Discovery keeps it up to date
     firmware_version: str | None = None
     filament_color: str | None = None
+    filament_color_name: str | None = None
+    filament_type: str | None = None
     last_error: str | None = None
 
     @property

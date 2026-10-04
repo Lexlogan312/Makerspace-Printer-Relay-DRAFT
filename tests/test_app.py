@@ -8,7 +8,9 @@ from relay.config import RelayConfig
 from relay.database import DatabaseError
 from relay.discovery import Announcement
 from relay.printer import Snapshot
-from tests.fixtures import PRINTER, state
+from tests.fixtures import PRINTER, PRINTING, state
+
+PRINTING_AMS = PRINTING["print"]["ams"]["ams"]
 
 OTHER_SERIAL = "03900D5C2000916"
 
@@ -147,6 +149,29 @@ def test_pushes_status_only_when_it_changes_and_measures_latency():
     clock.advance(31)  # status heartbeat
     relay.tick()
     assert len(db.written("upsert_status")) == pushes + 1
+
+
+def test_loaded_filament_is_written_in_one_update_only_when_it_changes():
+    relay, db, disc, clock = make_relay()
+    relay.tick()
+    conn = FakeConnection.created[0]
+    conn.report(state("RUNNING"), clock.wall.timestamp())   # PETG, #FF6A13 (fixtures)
+    clock.advance(2)
+    relay.tick()
+    assert db.written("update_printer") == [(PRINTER.id, {
+        "filament_color": "#FF6A13", "filament_color_name": "Orange", "filament_type": "PETG"})]
+
+    conn.report(state("RUNNING", mc_percent=50), clock.wall.timestamp())   # same filament
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("update_printer")) == 1
+
+    swapped = {"tray_now": "0", "ams": PRINTING_AMS}  # switch to the white PLA slot
+    conn.report(state("RUNNING", ams=swapped), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    assert db.written("update_printer")[-1] == (PRINTER.id, {
+        "filament_color": "#FFFFFF", "filament_color_name": "White", "filament_type": "PLA"})
 
 
 def test_no_offline_flash_during_startup_then_reports_problem():

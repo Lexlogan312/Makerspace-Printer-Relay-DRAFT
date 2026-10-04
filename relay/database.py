@@ -72,7 +72,8 @@ class Database:
     def load_printers(self) -> list[Printer]:
         """Every printer, including retired ones and ones without connection settings yet."""
         rows = self._request("GET", "printers", params={
-            "select": "id,serial,label,model,maintenance_status,firmware_version,filament_color,"
+            "select": "id,serial,label,model,maintenance_status,firmware_version,"
+                      "filament_color,filament_color_name,filament_type,"
                       "printer_connections(host,access_code,last_error)",
         })
         printers = []
@@ -85,6 +86,7 @@ class Database:
                 id=row["id"], serial=row["serial"], label=row["label"], model=row["model"],
                 maintenance_status=row["maintenance_status"], firmware_version=row.get("firmware_version"),
                 filament_color=row.get("filament_color"),
+                filament_color_name=row.get("filament_color_name"), filament_type=row.get("filament_type"),
                 access_code=conn.get("access_code") or "", host=conn.get("host"),
                 last_error=conn.get("last_error"),
             ))
