@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from relay.camera import CameraError, CameraTarget, SnapshotWorker, login_packet, read_frame
+from relay.camera import CameraError, CameraTarget, SnapshotWorker, login_packet, read_frame, read_settled_frame
 from tests.fixtures import PRINTER, state
 from tests.test_app import FakeConnection, make_relay
 
@@ -42,6 +42,13 @@ def test_reads_one_frame_across_many_small_reads():
 
 def test_skips_a_malformed_frame():
     assert read_frame(FakeSocket(framed(b"not a jpeg") + framed(JPEG))) == JPEG
+
+
+def test_waits_for_the_camera_to_settle_and_keeps_the_newest_frame():
+    first, later = JPEG.replace(b"pixels", b"blurry"), JPEG
+    ticks = iter([0.0, 1.0, 2.0, 3.5])  # deadline at 3.0
+    sock = FakeSocket(framed(first) + framed(first) + framed(later) + framed(b"unused"))
+    assert read_settled_frame(sock, 3.0, clock=lambda: next(ticks)) == later
 
 
 def test_rejects_a_bad_header_and_a_closed_connection():

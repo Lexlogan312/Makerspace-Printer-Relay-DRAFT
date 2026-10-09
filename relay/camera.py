@@ -2,9 +2,11 @@
 
 The A1 and P1 series serve their camera on TCP port 6000, inside TLS with the printer's own
 self-signed certificate (the same as MQTT on 8883). After an 80-byte login packet carrying the
-LAN access code, the printer streams JPEG frames, each preceded by a 16-byte header whose first
-4 bytes are the frame's length (little-endian). This takes the first complete frame and hangs up,
-so a snapshot costs one frame (roughly 50-200 KB), not a video stream.
+LAN access code, the printer streams JPEG frames (about 1-2 a second), each preceded by a 16-byte
+header whose first 4 bytes are the frame's length (little-endian). The camera wakes up when someone
+connects, and its first frames come out before exposure and white balance settle (a flat beige
+blur), so this keeps reading for `settle_s` seconds and returns the last frame, then hangs up.
+A snapshot costs a few frames (roughly 50-200 KB each), not a video stream.
 
 (The X1 and H2 series use RTSP on port 322 instead. They aren't in the makerspace, so they
 aren't handled here.)
@@ -75,8 +77,23 @@ def read_frame(sock, attempts: int = 3) -> bytes:
     raise CameraError("The printer's camera frames weren't valid JPEG images.")
 
 
-def grab_frame(host: str, access_code: str, timeout: float = 15.0) -> bytes:
-    """Connect, log in, and return one JPEG frame. Raises CameraError with a plain explanation."""
+SETTLE_S = 3.0  # how long the camera gets to adjust after waking up
+
+
+def read_settled_frame(sock, settle_s: float, clock=time.monotonic) -> bytes:
+    """Read frames for `settle_s` seconds (at least one), returning the newest."""
+    deadline = clock() + settle_s
+    frame = read_frame(sock)
+    while clock() < deadline:
+        try:
+            frame = read_frame(sock)
+        except CameraError:
+            break  # the stream ended early: the last good frame is still worth keeping
+    return frame
+
+
+def grab_frame(host: str, access_code: str, timeout: float = 15.0, settle_s: float = SETTLE_S) -> bytes:
+    """Connect, log in, and return one settled JPEG frame. Raises CameraError with a plain explanation."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE  # the printer's certificate is self-signed
@@ -94,7 +111,7 @@ def grab_frame(host: str, access_code: str, timeout: float = 15.0) -> bytes:
         with ctx.wrap_socket(raw, server_hostname=host) as sock:
             sock.settimeout(timeout)
             sock.sendall(login_packet(access_code))
-            return read_frame(sock)
+            return read_settled_frame(sock, settle_s)
     except socket.timeout:
         raise CameraError("The camera connected but sent no picture in time. Check the access code, and that "
                           "the printer's camera video setting is on.") from None
@@ -194,6 +211,8 @@ def main() -> None:
     parser.add_argument("--code", help="the printer's LAN access code (Settings > WLAN on the printer)")
     parser.add_argument("-c", "--config", default="relay.toml", help="relay config, for --printer (default: relay.toml)")
     parser.add_argument("--out", type=Path, default=Path("snapshot.jpg"), help="where to save it (default: snapshot.jpg)")
+    parser.add_argument("--settle", type=float, default=SETTLE_S, metavar="SECONDS",
+                        help=f"let the camera adjust this long before keeping a frame (default: {SETTLE_S:g})")
     args = parser.parse_args()
 
     try:
@@ -205,7 +224,7 @@ def main() -> None:
             label, host, code = args.host, args.host, args.code
         print(f"Connecting to {label} at {host}:{CAMERA_PORT}…")
         started = time.monotonic()
-        frame = grab_frame(host, code)
+        frame = grab_frame(host, code, settle_s=args.settle)
     except CameraError as e:
         sys.exit(f"error: {e}")
     args.out.write_bytes(frame)
