@@ -100,3 +100,17 @@ def test_only_connected_printing_printers_are_photographed():
     clock.advance(2)
     relay.tick()
     assert relay.camera_targets() == [CameraTarget(PRINTER.id, PRINTER.label, "10.42.0.23", PRINTER.access_code)]
+
+
+def test_a_missing_migration_is_reported_once_for_all_printers(caplog):
+    from relay.database import NEEDS_SNAPSHOT_SETUP, DatabaseError
+
+    class NoBucket:
+        def upload_snapshot(self, *args):
+            raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=404)
+
+    targets = [CameraTarget(str(i), f"P{i}", f"10.42.0.{i}", "1") for i in range(5)]
+    worker = SnapshotWorker(NoBucket(), 60, lambda: targets, grab=lambda h, c: JPEG)
+    worker.capture_all()
+    worker.capture_all()
+    assert sum("sql/07" in r.message for r in caplog.records) == 1

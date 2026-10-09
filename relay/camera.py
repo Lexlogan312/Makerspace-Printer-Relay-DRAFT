@@ -3,10 +3,10 @@
 The A1 and P1 series serve their camera on TCP port 6000, inside TLS with the printer's own
 self-signed certificate (the same as MQTT on 8883). After an 80-byte login packet carrying the
 LAN access code, the printer streams JPEG frames (about 1-2 a second), each preceded by a 16-byte
-header whose first 4 bytes are the frame's length (little-endian). The camera wakes up when someone
-connects, and its first frames come out before exposure and white balance settle (a flat beige
-blur), so this keeps reading for `settle_s` seconds and returns the last frame, then hangs up.
-A snapshot costs a few frames (roughly 50-200 KB each), not a video stream.
+header whose first 4 bytes are the frame's length (little-endian). This takes the first complete
+frame and hangs up, so a snapshot costs one frame (roughly 50-200 KB), not a video stream. If a
+camera's first frame ever looks washed out, `settle_s` keeps reading for that long and returns the
+newest frame instead. (A flat tan blur is usually the protective film still on the lens.)
 
 (The X1 and H2 series use RTSP on port 322 instead. They aren't in the makerspace, so they
 aren't handled here.)
@@ -77,7 +77,7 @@ def read_frame(sock, attempts: int = 3) -> bytes:
     raise CameraError("The printer's camera frames weren't valid JPEG images.")
 
 
-SETTLE_S = 3.0  # how long the camera gets to adjust after waking up
+SETTLE_S = 0.0  # seconds to let the camera adjust before keeping a frame (0: the first frame is fine)
 
 
 def read_settled_frame(sock, settle_s: float, clock=time.monotonic) -> bytes:
@@ -173,10 +173,17 @@ class SnapshotWorker:
             self.db.upload_snapshot(t.printer_id, jpeg, self.wall_clock().isoformat(timespec="seconds"))
         except Exception as e:  # a camera or upload problem must never stop the other printers
             message = str(e)
+            if "sql/07" in message:  # a setup problem, the same for every printer: say it once
+                if self._errors.get("setup") != message:
+                    log.warning("%s", message)
+                    self._errors["setup"] = message
+                return False
             if self._errors.get(t.printer_id) != message:
                 log.warning("[%s] camera snapshot failed: %s", t.label, message)
                 self._errors[t.printer_id] = message
             return False
+        if self._errors.pop("setup", None) is not None:
+            log.info("camera photos are uploading now")
         if self._errors.pop(t.printer_id, None) is not None:
             log.info("[%s] camera snapshots working again", t.label)
         return True

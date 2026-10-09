@@ -20,8 +20,8 @@ request_full_status = true       # ask printers for a full report ("pushall") on
 full_status_interval_s = 300     # ...and this often
 
 [camera]
-# Still photos of printing printers, shown in the dashboard's printer details. One photo per
-# printing printer every interval_s (minimum 15), so it barely touches the printer network.
-# Test one printer first:  uv run python -m relay.camera --printer "Fred Printstone"
-enabled = false
+# Still photos of printing printers, shown on the dashboard. One photo per printing printer every
+# interval_s (minimum 15), so it barely touches the printer network. On unless set to false.
+# Needs sql/07_camera_snapshots.sql. Test one printer: uv run python -m relay.camera --printer "Fred Printstone"
+enabled = true
 interval_s = 60

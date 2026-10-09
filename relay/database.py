@@ -57,6 +57,7 @@ def _status_row(r: dict) -> dict:
 
 
 SNAPSHOT_BUCKET = "printer-snapshots"
+NEEDS_SNAPSHOT_SETUP = "camera photos need sql/07_camera_snapshots.sql: run it once in the Supabase SQL editor"
 
 
 class Database:
@@ -165,10 +166,17 @@ class Database:
         except requests.RequestException as e:
             raise DatabaseError(f"can't reach Supabase Storage ({e.__class__.__name__})") from e
         if not resp.ok:
+            if "bucket not found" in resp.text.lower():
+                raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=resp.status_code)
             raise DatabaseError(f"Supabase Storage upload failed ({resp.status_code}): {resp.text[:300]}",
                                 status=resp.status_code)
-        self._request("PATCH", "printer_status", params={"printer_id": f"eq.{printer_id}"},
-                      json={"snapshot_at": taken_at}, headers={"Prefer": "return=minimal"})
+        try:
+            self._request("PATCH", "printer_status", params={"printer_id": f"eq.{printer_id}"},
+                          json={"snapshot_at": taken_at}, headers={"Prefer": "return=minimal"})
+        except DatabaseError as e:
+            if "snapshot_at" in str(e):  # the column comes from migration 07
+                raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=e.status) from e
+            raise
 
     # used by import_printers.py
 

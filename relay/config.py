@@ -40,7 +40,7 @@ class RelayConfig:
     printer_sync_interval_s: float = 30.0   # re-read the printer list from Supabase this often
     request_full_status: bool = True        # ask printers for a full report ("pushall")
     full_status_interval_s: float = 300.0
-    camera_enabled: bool = False            # camera snapshots of printing printers
+    camera_enabled: bool = True             # camera snapshots of printing printers
     camera_interval_s: float = 60.0         # one snapshot per printing printer this often
 
 
@@ -80,6 +80,6 @@ def load_config(path: str | Path) -> RelayConfig:
         printer_sync_interval_s=float(relay.get("printer_sync_interval_s", 30.0)),
         request_full_status=bool(relay.get("request_full_status", True)),
         full_status_interval_s=float(relay.get("full_status_interval_s", 300.0)),
-        camera_enabled=bool(camera.get("enabled", False)),
+        camera_enabled=bool(camera.get("enabled", True)),
         camera_interval_s=max(15.0, float(camera.get("interval_s", 60.0))),
     )
