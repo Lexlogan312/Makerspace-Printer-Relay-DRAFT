@@ -18,3 +18,10 @@ status_heartbeat_s = 30          # re-send unchanged printer status this often
 printer_sync_interval_s = 30     # pick up admin changes to printers this often
 request_full_status = true       # ask printers for a full report ("pushall") on connect
 full_status_interval_s = 300     # ...and this often
+
+[camera]
+# Still photos of printing printers, shown in the dashboard's printer details. One photo per
+# printing printer every interval_s (minimum 15), so it barely touches the printer network.
+# Test one printer first:  uv run python -m relay.camera --printer "Fred Printstone"
+enabled = false
+interval_s = 60

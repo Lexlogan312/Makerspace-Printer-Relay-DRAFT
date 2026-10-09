@@ -203,6 +203,8 @@ from public.print_job_hours
 group by day, weekday, hour;
 
 -- Jobs per printer per day (by the day the print started).
+-- 04 later adds a column to this view; dropping first keeps re-running 01-06 in order safe.
+drop view if exists public.print_jobs_daily;
 create or replace view public.print_jobs_daily with (security_invoker = true) as
 select (j.started_at at time zone public.analytics_time_zone())::date as day,
        j.printer_id,
@@ -229,6 +231,8 @@ from public.print_jobs
 group by 1, 2, 3;
 
 -- Reliability: hours offline and new errors per printer per day.
+-- 04 later adds a column to this view; dropping first keeps re-running 01-06 in order safe.
+drop view if exists public.printer_reliability_daily;
 create or replace view public.printer_reliability_daily with (security_invoker = true) as
 with connection_changes as (
   select printer_id, ts, to_value,

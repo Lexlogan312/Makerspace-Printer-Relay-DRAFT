@@ -60,6 +60,7 @@ def test_offline_status_row_only_flags_offline():
     online = next(r for r in rows if r["is_online"])
     offline = next(r for r in rows if not r["is_online"])
     assert online["gcode_state"] == "RUNNING" and online["print_error"] == 0
+    assert "subtask_name" not in online  # job names never go in the public table
     assert set(offline) == {"printer_id", "is_online", "last_seen"}  # last job data is left alone
 
 

@@ -33,7 +33,10 @@ def _in(values) -> str:
 
 
 def _status_row(r: dict) -> dict:
-    """A status record (relay/status.py) -> a printer_status row."""
+    """A status record (relay/status.py) -> a printer_status row.
+
+    printer_status is publicly readable, so it never carries the job name (it can identify a
+    student). Staff see the current job through print_jobs instead."""
     row = {"printer_id": r["printer_id"], "is_online": r["online"]}
     if r["last_seen"]:
         row["last_seen"] = r["last_seen"]
@@ -48,15 +51,18 @@ def _status_row(r: dict) -> dict:
         "nozzle_temper": r["nozzle_temp"],
         "bed_temper": r["bed_temp"],
         "wifi_signal": r["wifi_signal"],
-        "subtask_name": r["job_name"],
         "print_error": r["print_error"],
     })
     return row
 
 
+SNAPSHOT_BUCKET = "printer-snapshots"
+
+
 class Database:
     def __init__(self, url: str, key: str, timeout: float = 10.0):
         self.base = f"{url.rstrip('/')}/rest/v1"
+        self.storage = f"{url.rstrip('/')}/storage/v1"
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"apikey": key, "Content-Type": "application/json"})
@@ -146,6 +152,24 @@ class Database:
             self._request("DELETE", "discovered_printers", params={"serial": _in(serials)},
                           headers={"Prefer": "return=minimal"})
 
+    def upload_snapshot(self, printer_id: str, jpeg: bytes, taken_at: str) -> None:
+        """Replace the printer's camera snapshot (one file per printer, so storage never grows),
+        then record when it was taken so the dashboard knows it's fresh."""
+        url = f"{self.storage}/object/{SNAPSHOT_BUCKET}/{printer_id}.jpg"
+        try:
+            resp = self.session.post(url, data=jpeg, timeout=self.timeout, headers={
+                "Content-Type": "image/jpeg", "x-upsert": "true",
+                # The dashboard asks for ?v=<snapshot_at>, so each new photo has its own URL.
+                "Cache-Control": "max-age=300",
+            })
+        except requests.RequestException as e:
+            raise DatabaseError(f"can't reach Supabase Storage ({e.__class__.__name__})") from e
+        if not resp.ok:
+            raise DatabaseError(f"Supabase Storage upload failed ({resp.status_code}): {resp.text[:300]}",
+                                status=resp.status_code)
+        self._request("PATCH", "printer_status", params={"printer_id": f"eq.{printer_id}"},
+                      json={"snapshot_at": taken_at}, headers={"Prefer": "return=minimal"})
+
     # used by import_printers.py
 
     def upsert_printers(self, rows: list[dict]) -> list[dict]:
@@ -186,3 +210,4 @@ class DryRunDatabase(Database):
     def insert_heartbeat(self, row): log.debug("[dry-run] relay_heartbeats <- %s", row)
     def upsert_discovered(self, rows): log.debug("[dry-run] %d discovered_printers row(s)", len(rows))
     def delete_discovered(self, serials): log.debug("[dry-run] delete discovered_printers %s", serials)
+    def upload_snapshot(self, printer_id, jpeg, taken_at): log.info("[dry-run] snapshot for %s: %d KB", printer_id, len(jpeg) // 1024)

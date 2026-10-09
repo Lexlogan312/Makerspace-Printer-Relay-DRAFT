@@ -7,3 +7,4 @@ printers.toml
 .env
 raw/
 .ruff_cache/
+.claude/

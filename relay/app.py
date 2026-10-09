@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .camera import CameraTarget, SnapshotWorker
 from .config import Printer, RelayConfig
 from .database import Database, DatabaseError
 from .discovery import Discovery
@@ -32,6 +33,7 @@ STARTUP_GRACE_S = 15          # time for connections and first announcements bef
 MAX_PENDING_EVENTS = 10_000   # cap on queued events if Supabase is down for a long time
 DISCOVERED_REFRESH_S = 300    # how often to refresh last_seen for an unregistered printer
 HISTORY_BATCH = 500
+PRINTING_STATES = {"RUNNING", "PREPARE", "SLICING", "PAUSE"}  # worth a camera snapshot
 
 
 def connection_problem(snap: Snapshot, has_host: bool, seen_on_network: bool | None) -> str | None:
@@ -69,6 +71,7 @@ class Relay:
         self.unsent_since: dict[str, float] = {}             # printer id -> when unsent reports started arriving
         self.latencies: list[float] = []                     # seconds from report to Supabase, since the last heartbeat
         self.problems: dict[str, str | None] = {}            # printer id -> current connection problem
+        self.gcode_states: dict[str, str | None] = {}        # printer id -> latest gcode_state (read by the camera thread)
         self.pending_events: list[dict] = []
         self.pending_jobs: dict[str, dict] = {}              # job id -> latest row
         self.discovered_sent: dict[str, tuple[tuple, float]] = {}
@@ -88,6 +91,8 @@ class Relay:
 
     def run(self, stop: threading.Event) -> None:
         self.discovery.start()
+        if self.config.camera_enabled:
+            SnapshotWorker(self.db, self.config.camera_interval_s, self.camera_targets).start(stop)
         try:
             while not stop.is_set():
                 self.tick()
@@ -195,7 +200,7 @@ class Relay:
             row = history.close_open_job(self.wall_clock())
             if row:
                 self.pending_jobs[row["id"]] = row
-        for d in (self.last_sent, self.unsent_since, self.problems):
+        for d in (self.last_sent, self.unsent_since, self.problems, self.gcode_states):
             d.pop(pid, None)
 
     # 2. connections
@@ -282,6 +287,7 @@ class Relay:
                 continue  # don't flash "offline" while the relay is starting up
 
             record = build_status(p, snap.state, snap.connected, snap.last_message_at, wall)
+            self.gcode_states[pid] = record["gcode_state"] if snap.connected else None
             self._record_history(p, record, wall)
             fp = fingerprint(record)
             sent = self.last_sent.get(pid)
@@ -333,6 +339,17 @@ class Relay:
             dropped = len(self.pending_events) - MAX_PENDING_EVENTS
             del self.pending_events[:dropped]
             self._warn_once("events-dropped", "event queue full, dropping the oldest events")
+
+    # camera (called from the camera thread)
+
+    def camera_targets(self) -> list[CameraTarget]:
+        """Connected printers that are printing right now, with where to reach their camera."""
+        targets = []
+        for pid, p in list(self.printers.items()):
+            conn = self.conns.get(pid)
+            if conn and self.gcode_states.get(pid) in PRINTING_STATES:
+                targets.append(CameraTarget(pid, p.label, conn.host, p.access_code))
+        return targets
 
     # 5. connection problems
 

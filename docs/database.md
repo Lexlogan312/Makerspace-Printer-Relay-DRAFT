@@ -13,14 +13,21 @@ All tables live in Supabase's `public` schema. The migrations in `sql/` create e
 |---|---|---|---|
 | `printers` | admins, plus relay for `filament_color`, `filament_color_name`, `filament_type`, `model`, `firmware_version` | everyone | One row per printer: serial, label, model, `maintenance_status`, and the loaded filament (hex color, Elegoo color name, type) |
 | `printer_connections` | admins (`access_code`), relay (`host`, `last_error`) | admins | How to connect. Separate from `printers` because access codes must not be public |
-| `printer_status` | relay | everyone | Live state, one row per printer (upserted) |
+| `printer_status` | relay | everyone | Live state, one row per printer (upserted). Never holds the job name: that can identify a student, so the current job is read from `print_jobs` (staff-only). `snapshot_at` is when the latest camera photo was taken |
 | `discovered_printers` | relay | admins | Printers announcing themselves on the hotspot that aren't in `printers` yet |
 | `print_jobs` | relay | admins | One row per print: start/end, outcome, layers, filament. Admin-only because job names can identify students |
 | `printer_events` | relay | admins | Each online/offline change, `gcode_state` change, and new error |
 | `relay_heartbeats` | relay | admins | One row per minute the relay is running and can reach Supabase |
 | `admins` | you, in the SQL editor | nobody (`is_admin()` checks it) | Which signed-in users are admins |
+| Storage bucket `printer-snapshots` | relay | everyone (public bucket, no listing) | `<printer id>.jpg`: the latest camera photo of each printing printer, replaced each minute. The dashboard adds `?v=<snapshot_at>` so a new photo never shows a cached old one |
 
 ### Adding a printer
+
+The staff dashboard (Printers > Add printer) does this in one step through the
+`add_printer(serial, label, access_code)` database function (migration 06), which adds both rows
+or neither and only works for admins. Without the dashboard:
+
+#### By hand
 
 1. On the printer's touchscreen, join it to the `MakerspacePrinters` hotspot and note its
    **access code** (LAN settings).
