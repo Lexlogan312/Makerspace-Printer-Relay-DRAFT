@@ -172,3 +172,12 @@ def test_a_printer_already_being_photographed_is_not_queued_twice():
     assert [t.printer_id for t in worker.due()] == ["p"]   # still in flight
     clock.t = 120
     assert worker.due() == []
+
+
+def test_light_command_and_report_parsing():
+    from relay.light import ledctrl, light_mode
+    assert ledctrl("on")["system"] == {"sequence_id": "0", "command": "ledctrl", "led_node": "chamber_light",
+                                       "led_mode": "on", "led_on_time": 500, "led_off_time": 500,
+                                       "loop_times": 0, "interval_time": 0}
+    assert light_mode({"print": {"lights_report": [{"node": "chamber_light", "mode": "off"}]}}) == "off"
+    assert light_mode({"print": {"gcode_state": "IDLE"}}) is None
