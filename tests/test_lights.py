@@ -120,3 +120,26 @@ def test_lights_turned_on_before_a_restart_are_still_turned_off(tmp_path):
     conn.light = "on"
     report("IDLE")
     assert conn.commands == ["off"]
+
+
+def test_switching_to_never_turns_off_the_lights_the_relay_left_on(tmp_path):
+    (tmp_path / "lights.json").write_text(f'["{PRINTER.id}"]')   # from the last run, with "auto"
+    relay, conn, clock, report = make(tmp_path, light="never")
+    conn.light = "on"
+    report("RUNNING")
+    assert conn.commands == ["off"]                # switched off even though it's printing
+    report("RUNNING", advance=LIGHT_RETRY_S + 1)
+    assert conn.commands == ["off"]
+    assert (tmp_path / "lights.json").read_text() == "[]"
+    report("RUNNING")
+    assert conn.commands == ["off"]                # and from then on, never touched
+
+
+def test_shutdown_switches_off_the_relays_lights(tmp_path, monkeypatch):
+    import relay.app as app
+    monkeypatch.setattr(app.time, "sleep", lambda s: None)
+    relay, conn, clock, report = make(tmp_path)
+    report("RUNNING")
+    relay._lights_off_for_shutdown()
+    assert conn.commands == ["on", "off"]
+    assert (tmp_path / "lights.json").read_text() == "[]"

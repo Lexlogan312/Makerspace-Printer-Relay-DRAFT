@@ -143,6 +143,10 @@ class Relay:
         self._step("history", self._flush_history)
         if self.config.camera_enabled and self.config.camera_light == "auto":
             self._step("lights", self._control_lights)
+        elif self.lights_ours:
+            # Lights are off (or the camera is): just switch off any the relay left on before,
+            # e.g. after changing light = "auto" to "never", or a restart that wasn't clean.
+            self._step("lights", self._release_lights)
 
         wall = self.wall_clock()
         minute = wall.replace(second=0, microsecond=0)
@@ -432,13 +436,34 @@ class Relay:
         if changed:
             self._save_lights_ours()
 
+    def _release_lights(self) -> None:
+        """Switch off lights the relay turned on, and forget them once the printer reports them off."""
+        now, changed = self.clock(), False
+        for pid in list(self.lights_ours):
+            conn, mode = self.conns.get(pid), self.light_modes.get(pid)
+            if pid not in self.printers:          # retired or deleted: nothing left to switch off
+                self.lights_ours.discard(pid)
+                changed = True
+            elif mode == "off":
+                self.lights_ours.discard(pid)
+                changed = True
+            elif mode == "on" and conn and conn.is_connected:
+                sent = self.light_sent.get(pid)
+                if sent is None or now - sent[1] >= LIGHT_RETRY_S:
+                    if conn.set_light("off"):
+                        self.light_sent[pid] = ("off", now)
+        if changed:
+            self._save_lights_ours()
+
     def _lights_off_for_shutdown(self) -> None:
-        if self.config.camera_light != "auto" or not self.lights_ours:
-            return
+        sent = False
         for pid in list(self.lights_ours):
             conn = self.conns.get(pid)
             if conn and conn.set_light("off"):
                 self.lights_ours.discard(pid)
+                sent = True
+        if sent:
+            time.sleep(1.0)  # let the commands go out before the connections close
         self._save_lights_ours()
 
     def _load_lights_ours(self) -> set[str]:
