@@ -45,10 +45,18 @@ class RelayConfig:
     camera_idle_interval_s: float = 300.0   # ...per open printer this often (is the plate clear?)
     camera_watch_interval_s: float = 4.0    # ...while someone has the printer's details open
     camera_watch_max: int = 6               # ...for at most this many printers at once
+    camera_light: str = "never"             # "auto": light on while printing or watched; "never": don't touch it
 
 
 class ConfigError(ValueError):
     pass
+
+
+def _light_setting(value) -> str:
+    value = str(value).strip().lower()
+    if value not in ("auto", "never"):
+        raise ConfigError(f'[camera] light must be "auto" or "never", not {value!r}')
+    return value
 
 
 def load_config(path: str | Path) -> RelayConfig:
@@ -88,4 +96,5 @@ def load_config(path: str | Path) -> RelayConfig:
         camera_idle_interval_s=max(60.0, float(camera.get("idle_interval_s", 300.0))),
         camera_watch_interval_s=max(3.0, float(camera.get("watch_interval_s", 4.0))),
         camera_watch_max=min(20, max(1, int(camera.get("watch_max", 6)))),
+        camera_light=_light_setting(camera.get("light", "never")),
     )

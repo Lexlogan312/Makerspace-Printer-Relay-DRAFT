@@ -60,6 +60,12 @@ The relay saves still photos from each printer's built-in camera (on by default;
 - while someone has the printer's details open on the dashboard: every 4 seconds, for up to 6 printers at once
   (`watch_max`, up to 20; the relay grabs more photos in parallel as it goes up)
 
+With `light = "auto"` under `[camera]` (off by default), the relay also turns a printer's light on
+while it prints (and for 30 s after, for the photo of the result) or while someone watches it, and
+off again afterwards. It only turns off lights it turned on, and leaves alone any light someone
+switches themselves. That's the only thing the relay ever changes on a printer; it never starts,
+stops or changes a print. `uv run python -m relay.light --all` checks that every printer accepts it.
+
 It needs `sql/07_camera_snapshots.sql`, and `sql/08_camera_live_view.sql` for the fast refresh; until
 they're run, the log says so once and everything else carries on. Each photo replaces the printer's last one
 in the public Supabase Storage bucket `printer-snapshots`, and `printer_status.snapshot_at`
@@ -98,5 +104,6 @@ See [docs/database.md](docs/database.md) for every table and analytics view, and
 | `relay/status.py` | Raw printer data → the status record (status, progress, ETA, filament, …) |
 | `relay/history.py` | Status changes → `printer_events` rows and one `print_jobs` row per print |
 | `relay/camera.py` | Camera snapshots: the printer's port-6000 frame protocol, the background worker, and a test command |
+| `relay/light.py` | Test command for switching printer lights (the relay's own light control is in `app.py`) |
 | `relay/import_printers.py` | One-time import from the old `printers.toml` |
 | `sql/` | Database migrations, run in order in the Supabase SQL editor |

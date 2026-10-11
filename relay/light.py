@@ -24,23 +24,7 @@ import uuid
 
 import paho.mqtt.client as mqtt
 
-from .printer import MQTT_PORT, PUSHALL
-
-LIGHT = "chamber_light"
-
-
-def ledctrl(mode: str) -> dict:
-    return {"system": {"sequence_id": "0", "command": "ledctrl", "led_node": LIGHT, "led_mode": mode,
-                       "led_on_time": 500, "led_off_time": 500, "loop_times": 0, "interval_time": 0}}
-
-
-def light_mode(report: dict) -> str | None:
-    """The light's mode from a report, if the report mentions it."""
-    for light in (report.get("print") or {}).get("lights_report") or []:
-        if light.get("node") == LIGHT:
-            return light.get("mode")
-    return None
-
+from .printer import LIGHT, MQTT_PORT, PUSHALL, ledctrl, light_mode
 
 class LightTest:
     def __init__(self, host: str, serial: str, access_code: str):

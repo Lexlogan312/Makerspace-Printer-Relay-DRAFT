@@ -28,4 +28,9 @@ interval_s = 60            # printing printers (minimum 15)
 idle_interval_s = 300      # open printers, plus one photo right after each print ends (minimum 60)
 watch_interval_s = 4       # while someone has a printer's details open (minimum 3)
 watch_max = 6              # how many printers can be on that fast refresh at once (1 to 20)
+# Printer lights, for clearer photos. "auto": on while a printer prints (and 30 s after, for the
+# photo of the result) or while someone has it open on the dashboard; off otherwise. Lights someone
+# switches themselves are left alone. "never": the relay doesn't touch them. This is the only thing
+# the relay ever changes on a printer. Test first: uv run python -m relay.light --all
+light = "never"
 # Test one printer: uv run python -m relay.camera --printer "Fred Printstone"

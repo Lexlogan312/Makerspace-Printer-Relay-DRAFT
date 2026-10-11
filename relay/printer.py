@@ -21,6 +21,23 @@ MQTT_PORT = 8883  # Bambu printers' local MQTT broker (TLS)
 # Asks for a full status report. This doesn't control the printer.
 PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall"}}
 
+# The printer's light (the A1 reports it as "chamber_light"). Switching it is the only command the
+# relay ever sends that changes anything on a printer, and only when [camera] light = "auto".
+LIGHT = "chamber_light"
+
+
+def ledctrl(mode: str) -> dict:
+    return {"system": {"sequence_id": "0", "command": "ledctrl", "led_node": LIGHT, "led_mode": mode,
+                       "led_on_time": 500, "led_off_time": 500, "loop_times": 0, "interval_time": 0}}
+
+
+def light_mode(report: dict) -> str | None:
+    """The light's mode ("on"/"off") from a report or merged state, if it mentions the light."""
+    for light in (report.get("print") or {}).get("lights_report") or []:
+        if light.get("node") == LIGHT:
+            return light.get("mode")
+    return None
+
 
 def deep_merge(base: dict, update: dict) -> dict:
     """Merge `update` into `base` in place.
@@ -106,6 +123,13 @@ class PrinterConnection:
         self._client.loop_stop()
         if self._dump_file:
             self._dump_file.close()
+
+    def set_light(self, mode: str) -> bool:
+        """Switch the printer's light ("on"/"off"). Returns False when not connected."""
+        if not self._connected:
+            return False
+        self._client.publish(self.request_topic, json.dumps(ledctrl(mode)))
+        return True
 
     def request_full_status(self) -> None:
         if self._connected:

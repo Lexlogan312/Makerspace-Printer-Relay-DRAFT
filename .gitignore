@@ -8,3 +8,6 @@ printers.toml
 raw/
 .ruff_cache/
 .claude/
+
+# Which printer lights the relay turned on (kept across restarts)
+light-state.json

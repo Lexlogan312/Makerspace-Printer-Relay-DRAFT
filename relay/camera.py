@@ -169,6 +169,11 @@ class SnapshotWorker:
         self._watch_checked: float | None = None
         self._errors: dict[str, str] = {}           # printer id (or "setup"/"watch") -> last error logged
 
+    @property
+    def watching(self) -> set[str]:
+        """Printers someone has open right now (as of the last check, every 2 s)."""
+        return set(self._watching)
+
     def start(self, stop: threading.Event) -> None:
         threading.Thread(target=self.run, args=(stop,), name="camera", daemon=True).start()
 
