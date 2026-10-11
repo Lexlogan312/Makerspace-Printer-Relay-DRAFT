@@ -17,6 +17,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+# The one place it may write: /var/lib/printer-relay (which printer lights it turned on).
+# systemd creates it, owned by the relay's user, and passes it as $STATE_DIRECTORY.
+StateDirectory=printer-relay
 
 [Install]
 WantedBy=multi-user.target

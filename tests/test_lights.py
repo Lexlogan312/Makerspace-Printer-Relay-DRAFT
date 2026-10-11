@@ -26,12 +26,12 @@ class Watching:
     def __init__(self): self.watching = set()
 
 
-def make(light="auto", tmp_path=None, printer=PRINTER):
+def make(tmp_path, light="auto", printer=PRINTER):
     FakeConnection.created = []
     db, disc, clock = FakeDB([printer]), FakeDiscovery(), Clock()
     config = RelayConfig(supabase_url="x", supabase_key="x", camera_light=light)
     relay = Relay(config, db, disc, connection_factory=LightConnection, clock=lambda: clock.mono,
-                  wall_clock=lambda: clock.wall, light_state_path=(tmp_path / "lights.json") if tmp_path else None)
+                  wall_clock=lambda: clock.wall, light_state_path=tmp_path / "lights.json")
     relay.camera = Watching()
     disc.announce(printer.serial, "10.42.0.23")
     relay.tick()
@@ -47,7 +47,7 @@ def make(light="auto", tmp_path=None, printer=PRINTER):
 
 
 def test_on_while_printing_kept_on_for_the_end_photo_then_off(tmp_path):
-    relay, conn, clock, report = make(tmp_path=tmp_path)
+    relay, conn, clock, report = make(tmp_path)
     report("IDLE")
     assert conn.commands == []
     report("RUNNING")
@@ -65,7 +65,7 @@ def test_on_while_printing_kept_on_for_the_end_photo_then_off(tmp_path):
 
 
 def test_on_while_someone_watches(tmp_path):
-    relay, conn, clock, report = make(tmp_path=tmp_path)
+    relay, conn, clock, report = make(tmp_path)
     report("IDLE")
     relay.camera.watching = {PRINTER.id}
     report("IDLE")
@@ -76,8 +76,8 @@ def test_on_while_someone_watches(tmp_path):
     assert conn.commands == ["on", "off"]
 
 
-def test_a_light_someone_else_turned_on_is_left_on():
-    relay, conn, clock, report = make()
+def test_a_light_someone_else_turned_on_is_left_on(tmp_path):
+    relay, conn, clock, report = make(tmp_path)
     conn.light = "on"                              # switched on at the printer
     report("RUNNING")
     report("FINISH", advance=LIGHT_END_HOLD_S + 1)
@@ -85,8 +85,8 @@ def test_a_light_someone_else_turned_on_is_left_on():
     assert conn.commands == []
 
 
-def test_someone_switching_our_light_off_is_respected_until_the_next_print():
-    relay, conn, clock, report = make()
+def test_someone_switching_our_light_off_is_respected_until_the_next_print(tmp_path):
+    relay, conn, clock, report = make(tmp_path)
     report("RUNNING")
     assert conn.commands == ["on"]
     conn.light = "off"                             # someone turned it off at the printer
@@ -100,23 +100,23 @@ def test_someone_switching_our_light_off_is_respected_until_the_next_print():
     assert conn.commands == ["on", "on"]
 
 
-def test_a_printer_that_ignores_the_command_is_not_spammed():
-    relay, conn, clock, report = make()
+def test_a_printer_that_ignores_the_command_is_not_spammed(tmp_path):
+    relay, conn, clock, report = make(tmp_path)
     conn.obey = False
     for _ in range(10):
         report("RUNNING", advance=LIGHT_RETRY_S)
     assert conn.commands == ["on"]
 
 
-def test_never_means_never():
-    relay, conn, clock, report = make(light="never")
+def test_never_means_never(tmp_path):
+    relay, conn, clock, report = make(tmp_path, light="never")
     report("RUNNING")
     assert conn.commands == []
 
 
 def test_lights_turned_on_before_a_restart_are_still_turned_off(tmp_path):
     (tmp_path / "lights.json").write_text(f'["{PRINTER.id}"]')
-    relay, conn, clock, report = make(tmp_path=tmp_path)
+    relay, conn, clock, report = make(tmp_path)
     conn.light = "on"
     report("IDLE")
     assert conn.commands == ["off"]

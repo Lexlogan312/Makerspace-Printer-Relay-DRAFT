@@ -359,6 +359,7 @@ Optional but recommended: turn on automatic security updates with
 | Live logs | `journalctl -u printer-relay -f` |
 | Restart after editing `relay.toml` | `sudo systemctl restart printer-relay` |
 | Update the code (git) | `cd ~/printer-relay && git pull && uv sync && sudo systemctl restart printer-relay` |
+| Update the service file (after `deploy/printer-relay.service` changes) | `cd ~/printer-relay && sed "s/__USER__/$USER/g" deploy/printer-relay.service \| sudo tee /etc/systemd/system/printer-relay.service && sudo systemctl daemon-reload && sudo systemctl restart printer-relay` |
 | See which printers are on the hotspot | `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases` |
 | Add a printer | Join it to the hotspot (step 8). It appears in `discovered_printers`. Add it with its label and access code in the admin dashboard. The relay connects within 30 s, no restart needed |
 | Remove a printer | Set its `maintenance_status` to `offline_permanent` in the dashboard. This keeps its history (deleting the row erases it) |

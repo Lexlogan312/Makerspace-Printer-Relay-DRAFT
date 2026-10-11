@@ -19,6 +19,7 @@ unreachable, doesn't stop the others. Anything that failed is retried on a later
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -61,7 +62,7 @@ class Relay:
     def __init__(self, config: RelayConfig, db: Database, discovery: Discovery, dump_dir: Path | None = None,
                  connection_factory=PrinterConnection, clock=time.monotonic,
                  wall_clock=lambda: datetime.now(timezone.utc),
-                 light_state_path: Path | None = Path("light-state.json")):
+                 light_state_path: Path | None = None):
         self.config = config
         self.db = db
         self.discovery = discovery
@@ -83,7 +84,8 @@ class Relay:
         # Printer lights ([camera] light = "auto")
         self.camera: SnapshotWorker | None = None
         self.light_modes: dict[str, str | None] = {}         # printer id -> "on"/"off" as last reported
-        self.light_state_path = light_state_path
+        # Under systemd this is /var/lib/printer-relay (StateDirectory); run by hand, the current folder.
+        self.light_state_path = light_state_path or Path(os.environ.get("STATE_DIRECTORY", ".")) / "light-state.json"
         self.lights_ours: set[str] = self._load_lights_ours()  # lights the relay turned on (kept across restarts)
         self.light_sent: dict[str, tuple[str, float]] = {}   # printer id -> (mode, when) of the last command
         self.light_declined: set[str] = set()                # turned off by someone else: leave it until next time
