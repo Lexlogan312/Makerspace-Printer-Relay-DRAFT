@@ -27,3 +27,6 @@ $$;
 
 revoke all on function public.watch_printer(uuid) from public;
 grant execute on function public.watch_printer(uuid) to anon, authenticated;
+
+-- Make the new function callable straight away (the API caches the list of functions).
+notify pgrst, 'reload schema';
