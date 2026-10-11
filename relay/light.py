@@ -8,6 +8,7 @@ current state, switches it, waits for the printer to confirm, then puts it back 
     uv run python -m relay.light --printer "Fred Printstone" --mode on  # just turn it on
     uv run python -m relay.light --printer "Fred Printstone" --mode off
     uv run python -m relay.light --host 10.42.0.139 --serial 03900D5C2526895 --code 12345678
+    uv run python -m relay.light --all                               # every printer at once, then back
 
 The command is Bambu's "ledctrl" with the light the A1 reports as "chamber_light". Printers
 ignore control commands while signed in to Bambu Cloud; on the offline hotspot they shouldn't be.
@@ -96,10 +97,83 @@ class LightTest:
         return self.wait_for(lambda: self.mode == mode, timeout)
 
 
+def run_one(label: str, host: str, serial: str, code: str, mode: str, hold: float,
+            say=print, started: threading.Barrier | None = None) -> str:
+    """Switch one printer's light (and restore it in test mode). Returns a one-line result."""
+    test = LightTest(host, serial, code)
+    test.client.connect_async(host, MQTT_PORT, keepalive=30)
+    test.client.loop_start()
+    try:
+        if not test.connected.wait(15):
+            return "no answer (is it on and on this network?)"
+        if test.error:
+            return test.error
+        if not test.wait_for(lambda: test.mode is not None, 10):
+            return f"never reported a light called {LIGHT!r}"
+        before = test.mode
+        say(f"{label}: light is {before}")
+        target = "on" if mode == "test" else mode
+        if started is not None:
+            try:
+                started.wait(20)  # switch them all at the same moment
+            except threading.BrokenBarrierError:
+                pass
+        if not test.set(target):
+            note = f" (printer replied {test.replies[-1]})" if test.replies else ""
+            return f"no confirmation after 8 s, still {test.mode}{note}"
+        if mode != "test":
+            return f"turned {target} (confirmed)"
+        time.sleep(hold)
+        restored = test.set(before) if before != target else True
+        return f"on (confirmed), then back {before}" + ("" if restored else " NOT confirmed: check it")
+    finally:
+        test.client.disconnect()
+        test.client.loop_stop()
+
+
+def run_all(config_path: str, mode: str, hold: float) -> None:
+    from .config import load_config
+    from .database import Database
+    config = load_config(config_path)
+    db = Database(config.supabase_url, config.supabase_key)
+    try:
+        printers = [p for p in db.load_printers() if not p.retired and p.host and p.access_code]
+    finally:
+        db.close()
+    print(f"Switching {len(printers)} printers' lights {'on for %g s, then back' % hold if mode == 'test' else mode}…")
+    results: dict[str, str] = {}
+    lock = threading.Lock()
+    barrier = threading.Barrier(len(printers), timeout=20) if printers else None
+
+    def worker(p):
+        try:
+            result = run_one(p.label, p.host, p.serial, p.access_code, mode, hold, say=lambda m: None, started=barrier)
+        except Exception as e:  # one printer's problem shouldn't hide the others' results
+            result = f"error: {e}"
+        if barrier is not None and not result.startswith(("on", "turned", "no confirmation")):
+            barrier.abort()  # don't keep the others waiting for a printer that never connected
+        with lock:
+            results[p.label] = result
+
+    threads = [threading.Thread(target=worker, args=(p,), daemon=True) for p in printers]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60 + hold)
+    worked = sum(1 for r in results.values() if r.startswith(("on (confirmed)", "turned")))
+    for label in sorted(results, key=str.casefold):
+        print(f"  {label:28} {results[label]}")
+    missing = [p.label for p in printers if p.label not in results]
+    for label in missing:
+        print(f"  {label:28} timed out")
+    print(f"{worked} of {len(printers)} confirmed.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Test switching a printer's light over the network.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--printer", metavar="NAME", help="look up the printer in Supabase (needs relay.toml)")
+    target.add_argument("--all", action="store_true", help="every printer at once (needs relay.toml)")
     target.add_argument("--host", metavar="IP", help="the printer's IP (with --serial and --code)")
     parser.add_argument("--serial", help="the printer's serial number")
     parser.add_argument("--code", help="the printer's LAN access code")
@@ -109,6 +183,9 @@ def main() -> None:
     parser.add_argument("--hold", type=float, default=5.0, help="seconds to leave it on in test mode (default: 5)")
     args = parser.parse_args()
 
+    if args.all:
+        run_all(args.config, args.mode, args.hold)
+        return
     if args.printer:
         from .config import load_config
         from .database import Database
