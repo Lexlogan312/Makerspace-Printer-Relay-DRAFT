@@ -76,7 +76,7 @@ def test_worker_uploads_each_target_and_one_failure_does_not_stop_the_rest(caplo
         return JPEG
 
     when = datetime(2026, 10, 9, 15, 0, tzinfo=timezone.utc)
-    worker = SnapshotWorker(db, 60, lambda: targets, grab=grab, wall_clock=lambda: when)
+    worker = SnapshotWorker(db, lambda: targets, grab=grab, wall_clock=lambda: when)
     assert worker.capture_all() == 1
     assert db.uploads == [("b", len(JPEG), "2026-10-09T15:00:00+00:00")]
 
@@ -84,7 +84,7 @@ def test_worker_uploads_each_target_and_one_failure_does_not_stop_the_rest(caplo
     assert sum("camera snapshot failed" in r.message for r in caplog.records) == 1
 
 
-def test_only_connected_printing_printers_are_photographed():
+def test_printing_printers_are_photographed_and_open_ones_flagged_as_not_printing():
     relay, db, disc, clock = make_relay()
     disc.announce(PRINTER.serial, "10.42.0.23")
     relay.tick()
@@ -94,7 +94,8 @@ def test_only_connected_printing_printers_are_photographed():
     conn.report(state("IDLE"), clock.wall.timestamp())
     clock.advance(2)
     relay.tick()
-    assert relay.camera_targets() == []          # idle: nothing to look at
+    assert relay.camera_targets() == [CameraTarget(PRINTER.id, PRINTER.label, "10.42.0.23", PRINTER.access_code,
+                                                   printing=False)]  # open: photographed now and then
 
     conn.report(state("RUNNING"), clock.wall.timestamp())
     clock.advance(2)
@@ -110,7 +111,64 @@ def test_a_missing_migration_is_reported_once_for_all_printers(caplog):
             raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=404)
 
     targets = [CameraTarget(str(i), f"P{i}", f"10.42.0.{i}", "1") for i in range(5)]
-    worker = SnapshotWorker(NoBucket(), 60, lambda: targets, grab=lambda h, c: JPEG)
+    worker = SnapshotWorker(NoBucket(), lambda: targets, grab=lambda h, c: JPEG)
     worker.capture_all()
     worker.capture_all()
     assert sum("sql/07" in r.message for r in caplog.records) == 1
+
+
+class Clock:
+    def __init__(self): self.t = 0.0
+    def __call__(self): return self.t
+
+
+def schedule(watched=(), watch_max=6):
+    clock, targets = Clock(), {}
+    worker = SnapshotWorker(FakeDB(), lambda: list(targets.values()), printing_s=60, idle_s=300, watch_s=4,
+                            watch_max=watch_max, watched=lambda: set(watched), clock=clock)
+
+    def due():
+        shots = [t.printer_id for t in worker.due()]
+        for pid in shots:  # as if each capture finished at once
+            worker._in_flight.discard(pid)
+        return shots
+    return worker, clock, targets, due
+
+
+def target(pid, printing):
+    return CameraTarget(pid, pid, "10.42.0.1", "1", printing=printing)
+
+
+def test_printing_every_minute_open_every_five_and_once_right_after_a_print_ends():
+    worker, clock, targets, due = schedule()
+    targets["p"] = target("p", True)
+    targets["o"] = target("o", False)
+    assert sorted(due()) == ["o", "p"]   # first photo of each straight away
+    clock.t = 59
+    assert due() == []
+    clock.t = 60
+    assert due() == ["p"]
+    clock.t = 70
+    targets["p"] = target("p", False)    # the print just finished: photograph the plate now
+    assert due() == ["p"]
+    clock.t = 299
+    assert due() == []
+    clock.t = 300
+    assert due() == ["o"]
+
+
+def test_watched_printers_refresh_every_few_seconds_up_to_a_limit():
+    worker, clock, targets, due = schedule(watched={"a", "b", "c"}, watch_max=2)
+    for pid in "abc":
+        targets[pid] = target(pid, False)
+    due()
+    clock.t = 4
+    assert sorted(due()) == ["a", "b"]   # c is watched too, but over the limit: normal schedule
+
+
+def test_a_printer_already_being_photographed_is_not_queued_twice():
+    worker, clock, targets, due = schedule()
+    targets["p"] = target("p", True)
+    assert [t.printer_id for t in worker.due()] == ["p"]   # still in flight
+    clock.t = 120
+    assert worker.due() == []

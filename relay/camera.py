@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,43 +130,100 @@ class CameraTarget:
     label: str
     host: str
     access_code: str
+    printing: bool = True
 
 
 class SnapshotWorker:
-    """Takes one snapshot of each printing printer every `interval_s`, on its own thread so a
-    slow camera never holds up status updates. Each photo replaces the printer's previous one."""
+    """Keeps each printer's photo about as fresh as it's useful to be, on background threads so a
+    slow camera never holds up status updates. Each photo replaces the printer's previous one.
 
-    def __init__(self, db, interval_s: float, targets: Callable[[], list[CameraTarget]],
+    - printing: every `printing_s` (default 60 s)
+    - open (idle or finished): every `idle_s` (default 5 min), plus one right after a print ends,
+      so people can see whether the last print is still on the plate
+    - someone has its details open on the dashboard: every `watch_s` (default 4 s), for at most
+      `watch_max` printers at once (default 6), so anyone with the board open can't put the whole
+      fleet on fast refresh
+    """
+
+    def __init__(self, db, targets: Callable[[], list[CameraTarget]], *, printing_s: float = 60.0,
+                 idle_s: float = 300.0, watch_s: float = 4.0, watch_max: int = 6, workers: int | None = None,
+                 watched: Callable[[], set[str]] | None = None,
                  grab: Callable[[str, str], bytes] = grab_frame,
-                 wall_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 wall_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 clock: Callable[[], float] = time.monotonic):
         self.db = db
-        self.interval_s = interval_s
-        self.targets = targets          # printing printers right now (supplied by the relay)
+        self.targets = targets          # printers worth photographing right now (from the relay)
+        self.printing_s, self.idle_s, self.watch_s, self.watch_max = printing_s, idle_s, watch_s, watch_max
+        self.watched = watched or (lambda: set())   # printer ids someone is looking at
         self.grab = grab                # swapped for a fake in tests
         self.wall_clock = wall_clock
-        self._errors: dict[str, str] = {}   # printer id -> last error logged, so it's logged once
-        self._thread: threading.Thread | None = None
+        self.clock = clock
+        # A photo takes about 2 s, so keeping `watch_max` printers on a `watch_s` cycle needs about
+        # watch_max * 2 / watch_s grabs at once, plus room for the regular schedule.
+        self.workers = workers or max(4, round(watch_max * 2 / watch_s) + 2)
+        self._last_shot: dict[str, float] = {}      # printer id -> when its latest capture started
+        self._was_printing: dict[str, bool] = {}
+        self._in_flight: set[str] = set()
+        self._lock = threading.Lock()
+        self._watching: set[str] = set()
+        self._watch_checked: float | None = None
+        self._errors: dict[str, str] = {}           # printer id (or "setup"/"watch") -> last error logged
 
     def start(self, stop: threading.Event) -> None:
-        self._thread = threading.Thread(target=self.run, args=(stop,), name="camera", daemon=True)
-        self._thread.start()
+        threading.Thread(target=self.run, args=(stop,), name="camera", daemon=True).start()
 
     def run(self, stop: threading.Event) -> None:
-        log.info("camera snapshots on: every %.0f s for each printing printer", self.interval_s)
-        while not stop.is_set():
-            started = time.monotonic()
-            self.capture_all(stop)
-            stop.wait(max(1.0, self.interval_s - (time.monotonic() - started)))
+        log.info("camera photos on: printing every %.0f s, open every %.0f s, every %.0f s while someone watches",
+                 self.printing_s, self.idle_s, self.watch_s)
+        with ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="camera") as pool:
+            while not stop.is_set():
+                for t in self.due():
+                    pool.submit(self._capture_and_release, t)
+                stop.wait(0.5)
 
-    def capture_all(self, stop: threading.Event | None = None) -> int:
-        """One pass over the printing printers. Returns how many snapshots were saved."""
-        saved = 0
+    def due(self) -> list[CameraTarget]:
+        """Targets whose next photo is due now. Marks them in flight."""
+        now = self.clock()
+        watching = self._refresh_watching(now)
+        out = []
         for t in self.targets():
-            if stop is not None and stop.is_set():
-                break
-            if self.capture(t):
-                saved += 1
-        return saved
+            was = self._was_printing.get(t.printer_id)
+            self._was_printing[t.printer_id] = t.printing
+            just_finished = was is True and not t.printing
+            interval = self.watch_s if t.printer_id in watching else (self.printing_s if t.printing else self.idle_s)
+            last = self._last_shot.get(t.printer_id)
+            with self._lock:
+                if t.printer_id in self._in_flight:
+                    continue
+                if last is None or just_finished or now - last >= interval:
+                    self._in_flight.add(t.printer_id)
+                    self._last_shot[t.printer_id] = now
+                    out.append(t)
+        return out
+
+    def _refresh_watching(self, now: float) -> set[str]:
+        if self._watch_checked is not None and now - self._watch_checked < 2.0:
+            return self._watching
+        self._watch_checked = now
+        try:
+            ids = self.watched()
+        except Exception as e:
+            self._log_once("watch", "%s", str(e))
+            return self._watching
+        self._errors.pop("watch", None)
+        self._watching = set(sorted(ids)[:self.watch_max])
+        return self._watching
+
+    def _capture_and_release(self, t: CameraTarget) -> None:
+        try:
+            self.capture(t)
+        finally:
+            with self._lock:
+                self._in_flight.discard(t.printer_id)
+
+    def capture_all(self) -> int:
+        """Photograph every target once, now (used by tests and for a manual pass)."""
+        return sum(self.capture(t) for t in self.targets())
 
     def capture(self, t: CameraTarget) -> bool:
         try:
@@ -174,19 +232,21 @@ class SnapshotWorker:
         except Exception as e:  # a camera or upload problem must never stop the other printers
             message = str(e)
             if "sql/07" in message:  # a setup problem, the same for every printer: say it once
-                if self._errors.get("setup") != message:
-                    log.warning("%s", message)
-                    self._errors["setup"] = message
-                return False
-            if self._errors.get(t.printer_id) != message:
-                log.warning("[%s] camera snapshot failed: %s", t.label, message)
-                self._errors[t.printer_id] = message
+                self._log_once("setup", "%s", message)
+            else:
+                self._log_once(t.printer_id, "[%s] camera snapshot failed: %s", t.label, message)
             return False
         if self._errors.pop("setup", None) is not None:
             log.info("camera photos are uploading now")
         if self._errors.pop(t.printer_id, None) is not None:
             log.info("[%s] camera snapshots working again", t.label)
         return True
+
+    def _log_once(self, key: str, fmt: str, *args) -> None:
+        message = fmt % args
+        if self._errors.get(key) != message:
+            log.warning("%s", message)
+            self._errors[key] = message
 
 
 def _lookup(config_path: str, name: str) -> tuple[str, str, str]:

@@ -33,7 +33,7 @@ STARTUP_GRACE_S = 15          # time for connections and first announcements bef
 MAX_PENDING_EVENTS = 10_000   # cap on queued events if Supabase is down for a long time
 DISCOVERED_REFRESH_S = 300    # how often to refresh last_seen for an unregistered printer
 HISTORY_BATCH = 500
-PRINTING_STATES = {"RUNNING", "PREPARE", "SLICING", "PAUSE"}  # worth a camera snapshot
+PRINTING_STATES = {"RUNNING", "PREPARE", "SLICING", "PAUSE"}  # photographed often
 
 
 def connection_problem(snap: Snapshot, has_host: bool, seen_on_network: bool | None) -> str | None:
@@ -92,7 +92,9 @@ class Relay:
     def run(self, stop: threading.Event) -> None:
         self.discovery.start()
         if self.config.camera_enabled:
-            SnapshotWorker(self.db, self.config.camera_interval_s, self.camera_targets).start(stop)
+            SnapshotWorker(self.db, self.camera_targets, printing_s=self.config.camera_interval_s,
+                           idle_s=self.config.camera_idle_interval_s, watch_s=self.config.camera_watch_interval_s,
+                           watch_max=self.config.camera_watch_max, watched=self.db.load_watched).start(stop)
         try:
             while not stop.is_set():
                 self.tick()
@@ -343,12 +345,14 @@ class Relay:
     # camera (called from the camera thread)
 
     def camera_targets(self) -> list[CameraTarget]:
-        """Connected printers that are printing right now, with where to reach their camera."""
+        """Connected, in-service printers that have reported a state, with where to reach their camera.
+        Printing ones are photographed often; open ones now and then (is the plate clear?)."""
         targets = []
         for pid, p in list(self.printers.items()):
             conn = self.conns.get(pid)
-            if conn and self.gcode_states.get(pid) in PRINTING_STATES:
-                targets.append(CameraTarget(pid, p.label, conn.host, p.access_code))
+            state = self.gcode_states.get(pid)
+            if conn and state and p.maintenance_status == "operational":
+                targets.append(CameraTarget(pid, p.label, conn.host, p.access_code, printing=state in PRINTING_STATES))
         return targets
 
     # 5. connection problems

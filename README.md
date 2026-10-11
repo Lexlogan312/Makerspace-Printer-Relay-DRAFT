@@ -27,7 +27,8 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
    [sql/05_printer_filament.sql](sql/05_printer_filament.sql),
    [sql/06_private_job_names_and_add_printer.sql](sql/06_private_job_names_and_add_printer.sql)
    (update the relay before running 06),
-   [sql/07_camera_snapshots.sql](sql/07_camera_snapshots.sql).
+   [sql/07_camera_snapshots.sql](sql/07_camera_snapshots.sql),
+   [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:
@@ -51,15 +52,22 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
 
 ## Camera snapshots
 
-While a printer is printing, the relay saves one still photo from its built-in camera every
-minute (on by default; `[camera]` in `relay.toml` turns it off or changes the interval). It needs
-`sql/07_camera_snapshots.sql`; until that's run, the log says so once and everything else carries on. Each photo replaces the printer's last one
+The relay saves still photos from each printer's built-in camera (on by default; `[camera]` in
+`relay.toml` turns it off or changes the timing):
+
+- printing: every minute
+- open: every 5 minutes, plus one right after each print ends, so people can see whether the plate is clear
+- while someone has the printer's details open on the dashboard: every 4 seconds, for up to 6 printers at once
+  (`watch_max`, up to 20; the relay grabs more photos in parallel as it goes up)
+
+It needs `sql/07_camera_snapshots.sql`, and `sql/08_camera_live_view.sql` for the fast refresh; until
+they're run, the log says so once and everything else carries on. Each photo replaces the printer's last one
 in the public Supabase Storage bucket `printer-snapshots`, and `printer_status.snapshot_at`
 says when it was taken. The dashboard shows it to everyone, so students can check on their build.
 Only the relay can upload; nobody can list the bucket.
 
-A photo is one ~100 KB frame per printer per minute, so it doesn't strain the hotspot (a live
-video stream from 20 printers would). Test one printer before turning it on:
+A photo is one ~65 KB frame, so even the fast refresh is light on the hotspot (about 16 KB/s per
+watched printer). A continuous video stream from 20 printers would not be. Test one printer before turning it on:
 
 ```bash
 uv run python -m relay.camera --printer "Fred Printstone" --out fred.jpg   # uses relay.toml

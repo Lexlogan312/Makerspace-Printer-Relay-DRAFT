@@ -41,7 +41,10 @@ class RelayConfig:
     request_full_status: bool = True        # ask printers for a full report ("pushall")
     full_status_interval_s: float = 300.0
     camera_enabled: bool = True             # camera snapshots of printing printers
-    camera_interval_s: float = 60.0         # one snapshot per printing printer this often
+    camera_interval_s: float = 60.0         # one photo per printing printer this often
+    camera_idle_interval_s: float = 300.0   # ...per open printer this often (is the plate clear?)
+    camera_watch_interval_s: float = 4.0    # ...while someone has the printer's details open
+    camera_watch_max: int = 6               # ...for at most this many printers at once
 
 
 class ConfigError(ValueError):
@@ -82,4 +85,7 @@ def load_config(path: str | Path) -> RelayConfig:
         full_status_interval_s=float(relay.get("full_status_interval_s", 300.0)),
         camera_enabled=bool(camera.get("enabled", True)),
         camera_interval_s=max(15.0, float(camera.get("interval_s", 60.0))),
+        camera_idle_interval_s=max(60.0, float(camera.get("idle_interval_s", 300.0))),
+        camera_watch_interval_s=max(3.0, float(camera.get("watch_interval_s", 4.0))),
+        camera_watch_max=min(20, max(1, int(camera.get("watch_max", 6)))),
     )

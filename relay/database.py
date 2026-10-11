@@ -178,6 +178,19 @@ class Database:
                 raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=e.status) from e
             raise
 
+    def load_watched(self) -> set[str]:
+        """Printers someone has open on the dashboard right now (sql/08_camera_live_view.sql)."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            rows = self._request("GET", "camera_watch", params={"select": "printer_id", "until": f"gt.{now}"})
+        except DatabaseError as e:
+            if e.status == 404 or "camera_watch" in str(e):
+                raise DatabaseError("faster photos while someone watches need sql/08_camera_live_view.sql: "
+                                    "run it once in the Supabase SQL editor", status=e.status) from e
+            raise
+        return {r["printer_id"] for r in rows}
+
     # used by import_printers.py
 
     def upsert_printers(self, rows: list[dict]) -> list[dict]:
