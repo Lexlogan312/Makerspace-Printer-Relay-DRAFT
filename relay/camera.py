@@ -138,7 +138,7 @@ class SnapshotWorker:
     slow camera never holds up status updates. Each photo replaces the printer's previous one.
 
     - printing: every `printing_s` (default 60 s)
-    - open (idle or finished): every `idle_s` (default 5 min), plus one right after a print ends,
+    - open (idle or finished): every `idle_s` (default 10 min), plus one right after a print ends,
       so people can see whether the last print is still on the plate
     - someone has its details open on the dashboard: every `watch_s` (default 4 s), for at most
       `watch_max` printers at once (default 6), so anyone with the board open can't put the whole
@@ -146,7 +146,7 @@ class SnapshotWorker:
     """
 
     def __init__(self, db, targets: Callable[[], list[CameraTarget]], *, printing_s: float = 60.0,
-                 idle_s: float = 300.0, watch_s: float = 4.0, watch_max: int = 6, workers: int | None = None,
+                 idle_s: float = 600.0, watch_s: float = 4.0, watch_max: int = 6, workers: int | None = None,
                  watched: Callable[[], set[str]] | None = None,
                  grab: Callable[[str, str], bytes] = grab_frame,
                  wall_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -207,7 +207,7 @@ class SnapshotWorker:
         return out
 
     def _refresh_watching(self, now: float) -> set[str]:
-        if self._watch_checked is not None and now - self._watch_checked < 2.0:
+        if self._watch_checked is not None and now - self._watch_checked < 0.5:
             return self._watching
         self._watch_checked = now
         try:

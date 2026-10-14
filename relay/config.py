@@ -36,13 +36,13 @@ class RelayConfig:
     # so printers elsewhere on campus are ignored. None accepts any network, which is handy on a Mac.
     printer_network: ipaddress.IPv4Network | None = None
     push_interval_s: float = 2.0            # how often the main loop runs and pushes changes
-    status_heartbeat_s: float = 30.0        # re-send unchanged printer status this often
+    status_heartbeat_s: float = 60.0        # re-send unchanged printer status this often (all in one request)
     printer_sync_interval_s: float = 30.0   # re-read the printer list from Supabase this often
     request_full_status: bool = True        # ask printers for a full report ("pushall")
     full_status_interval_s: float = 300.0
     camera_enabled: bool = True             # camera snapshots of printing printers
     camera_interval_s: float = 60.0         # one photo per printing printer this often
-    camera_idle_interval_s: float = 300.0   # ...per open printer this often (is the plate clear?)
+    camera_idle_interval_s: float = 600.0   # ...per open printer this often (is the plate clear?)
     camera_watch_interval_s: float = 4.0    # ...while someone has the printer's details open
     camera_watch_max: int = 6               # ...for at most this many printers at once
     camera_light: str = "never"             # "auto": light on while printing or watched; "never": don't touch it
@@ -87,13 +87,13 @@ def load_config(path: str | Path) -> RelayConfig:
         supabase_key=key,
         printer_network=network,
         push_interval_s=float(relay.get("push_interval_s", 2.0)),
-        status_heartbeat_s=float(relay.get("status_heartbeat_s", 30.0)),
+        status_heartbeat_s=max(30.0, float(relay.get("status_heartbeat_s", 60.0))),
         printer_sync_interval_s=float(relay.get("printer_sync_interval_s", 30.0)),
         request_full_status=bool(relay.get("request_full_status", True)),
         full_status_interval_s=float(relay.get("full_status_interval_s", 300.0)),
         camera_enabled=bool(camera.get("enabled", True)),
         camera_interval_s=max(15.0, float(camera.get("interval_s", 60.0))),
-        camera_idle_interval_s=max(60.0, float(camera.get("idle_interval_s", 300.0))),
+        camera_idle_interval_s=max(60.0, float(camera.get("idle_interval_s", 600.0))),
         camera_watch_interval_s=max(3.0, float(camera.get("watch_interval_s", 4.0))),
         camera_watch_max=min(20, max(1, int(camera.get("watch_max", 6)))),
         camera_light=_light_setting(camera.get("light", "never")),

@@ -146,9 +146,48 @@ def test_pushes_status_only_when_it_changes_and_measures_latency():
     relay.tick()
     assert len(db.written("upsert_status")) == pushes  # unchanged
 
-    clock.advance(31)  # status heartbeat
+    clock.advance(31)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes  # still within the minute
+
+    clock.advance(30)  # status refresh, once a minute
     relay.tick()
     assert len(db.written("upsert_status")) == pushes + 1
+
+
+def test_temperature_and_layer_wobble_alone_do_not_trigger_a_push():
+    relay, db, disc, clock = make_relay()
+    relay.tick()
+    conn = FakeConnection.created[0]
+    conn.report(state("RUNNING", nozzle_temper=220.0, bed_temper=65.0, layer_num=10), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    pushes = len(db.written("upsert_status"))
+    conn.report(state("RUNNING", nozzle_temper=221.3, bed_temper=64.6, layer_num=11), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes          # nothing a student sees changed
+    clock.advance(60)
+    relay.tick()
+    (records,) = db.written("upsert_status")[-1]
+    assert records[0]["nozzle_temp"] == 221 and records[0]["layer_current"] == 11  # sent with the refresh
+
+
+def test_refreshes_of_unchanged_printers_ride_along_in_one_request():
+    other = dataclasses.replace(PRINTER, id="22222222-2222-2222-2222-222222222222", serial=OTHER_SERIAL, label="Flint")
+    relay, db, disc, clock = make_relay([PRINTER, other])
+    disc.announce(PRINTER.serial, "10.42.0.23")
+    disc.announce(OTHER_SERIAL, "10.42.0.24")
+    relay.tick()
+    a, b = FakeConnection.created
+    a.report(state("IDLE"), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()                       # first push: a
+    b.report(state("IDLE"), clock.wall.timestamp())
+    clock.advance(40)
+    relay.tick()                       # b's first push; a is 40 s old (past halfway), so it rides along
+    (records,) = db.written("upsert_status")[-1]
+    assert {r["printer_id"] for r in records} == {PRINTER.id, other.id}
 
 
 def test_loaded_filament_is_written_in_one_update_only_when_it_changes():

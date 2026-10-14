@@ -28,7 +28,8 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
    [sql/06_private_job_names_and_add_printer.sql](sql/06_private_job_names_and_add_printer.sql)
    (update the relay before running 06),
    [sql/07_camera_snapshots.sql](sql/07_camera_snapshots.sql),
-   [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql).
+   [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql),
+   [sql/09_remove_camera_watch.sql](sql/09_remove_camera_watch.sql) (08 is superseded; 09 removes what it added).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:
@@ -56,7 +57,7 @@ The relay saves still photos from each printer's built-in camera (on by default;
 `relay.toml` turns it off or changes the timing):
 
 - printing: every minute
-- open: every 5 minutes, plus one right after each print ends, so people can see whether the plate is clear
+- open: every 10 minutes, plus one right after each print ends, so people can see whether the plate is clear
 - while someone has the printer's details open on the dashboard: every 4 seconds, for up to 6 printers at once
   (`watch_max`, up to 20; the relay grabs more photos in parallel as it goes up)
 
@@ -66,8 +67,9 @@ off again afterwards. It only turns off lights it turned on, and leaves alone an
 switches themselves. That's the only thing the relay ever changes on a printer; it never starts,
 stops or changes a print. `uv run python -m relay.light --all` checks that every printer accepts it.
 
-It needs `sql/07_camera_snapshots.sql`, and `sql/08_camera_live_view.sql` for the fast refresh; until
-they're run, the log says so once and everything else carries on. Each photo replaces the printer's last one
+It needs `sql/07_camera_snapshots.sql`; until that's run, the log says so once and everything else
+carries on. Who's watching comes from Supabase Realtime Presence (channel `camera-watch`): the
+dashboard joins it while a printer is open and the relay listens, so nothing polls the database. Each photo replaces the printer's last one
 in the public Supabase Storage bucket `printer-snapshots`, and `printer_status.snapshot_at`
 says when it was taken. The dashboard shows it to everyone, so students can check on their build.
 Only the relay can upload; nobody can list the bucket.
@@ -86,6 +88,14 @@ A flat tan or grey blur means the protective film is still on the camera lens.
 
 To deploy on the Pi, see [docs/raspberry-pi-setup.md](docs/raspberry-pi-setup.md). The
 service and firewall files are in `deploy/`.
+
+## Supabase usage
+
+Every request to Supabase is logged, and the Free plan includes 1 GB of logs a month, so the relay
+keeps requests down: status is pushed when something a student would see changes (temperature and
+layer number alone don't count; they ride along), unchanged printers are refreshed once a minute in
+a single request, and camera viewers arrive over Realtime instead of being polled. That's roughly
+10,000-15,000 requests a day for 20 printers.
 
 ## What's in the database
 

@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .camera import CameraTarget, SnapshotWorker
+from .presence import PresenceWatcher
 from .config import Printer, RelayConfig
 from .database import Database, DatabaseError
 from .discovery import Discovery
@@ -111,10 +112,13 @@ class Relay:
     def run(self, stop: threading.Event) -> None:
         self.discovery.start()
         if self.config.camera_enabled:
+            # Who has a printer open on the dashboard, pushed by Supabase Realtime (no polling).
+            presence = PresenceWatcher(self.config.supabase_url, self.config.supabase_key)
+            presence.start(stop)
             self.camera = SnapshotWorker(self.db, self.camera_targets, printing_s=self.config.camera_interval_s,
                                          idle_s=self.config.camera_idle_interval_s,
                                          watch_s=self.config.camera_watch_interval_s,
-                                         watch_max=self.config.camera_watch_max, watched=self.db.load_watched)
+                                         watch_max=self.config.camera_watch_max, watched=presence.watching)
             self.camera.start(stop)
             if self.config.camera_light == "auto":
                 log.info("printer lights: on while printing or while someone watches")
@@ -304,7 +308,7 @@ class Relay:
     def _push_status(self) -> None:
         now, wall = self.clock(), self.wall_clock()
         in_grace = now - self.started < STARTUP_GRACE_S
-        to_send = []
+        candidates, to_send = [], []
         for pid, p in self.printers.items():
             conn = self.conns.get(pid)
             snap = conn.snapshot() if conn else Snapshot()
@@ -326,10 +330,19 @@ class Relay:
             fp = fingerprint(record)
             sent = self.last_sent.get(pid)
             changed = sent is None or sent[0] != fp
-            if changed or now - sent[1] >= self.config.status_heartbeat_s:
-                to_send.append((record, fp, changed))
-            else:
-                self.unsent_since.pop(pid, None)  # the reports since last time didn't change anything
+            age = float("inf") if sent is None else now - sent[1]
+            candidates.append((record, fp, changed, age))
+
+        # Send real changes now. Unchanged printers are refreshed every status_heartbeat_s (so
+        # last_seen stays fresh), and any that are at least halfway there ride along with this
+        # request, so the refreshes line up into one request instead of one per printer.
+        heartbeat = self.config.status_heartbeat_s
+        if any(changed or age >= heartbeat for _, _, changed, age in candidates):
+            to_send = [(r, fp, changed) for r, fp, changed, age in candidates if changed or age >= heartbeat / 2]
+        sent_ids = {r["printer_id"] for r, _, _ in to_send}
+        for record, _, _, _ in candidates:
+            if record["printer_id"] not in sent_ids:
+                self.unsent_since.pop(record["printer_id"], None)  # nothing new since the last push
 
         if not to_send:
             return

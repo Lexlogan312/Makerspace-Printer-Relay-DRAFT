@@ -21,7 +21,11 @@ EXTERNAL_SPOOL = 254
 
 # These change on every push (wifi_signal jitters a few dBm on every report). Leave them out
 # when checking whether a record actually changed. The heartbeat still sends them.
-VOLATILE_FIELDS = {"last_seen", "estimated_completion", "wifi_signal"}
+# Sent with every push, but changes to these alone don't trigger one: temperatures wobble every
+# second while printing, and the layer number ticks constantly. They still go out with any real
+# change and with the once-a-minute refresh. (Each push is a Supabase request, and every request
+# is a log entry; log volume is limited.)
+VOLATILE_FIELDS = {"last_seen", "estimated_completion", "wifi_signal", "nozzle_temp", "bed_temp", "layer_current"}
 
 
 def _int(value) -> int | None:

@@ -14,7 +14,7 @@ key = ""
 printer_network = ""          # Pi: "10.42.0.0/24"
 
 push_interval_s = 2              # main loop: push changes this often
-status_heartbeat_s = 30          # re-send unchanged printer status this often
+status_heartbeat_s = 60          # refresh unchanged printers this often, all in one request (minimum 30)
 printer_sync_interval_s = 30     # pick up admin changes to printers this often
 request_full_status = true       # ask printers for a full report ("pushall") on connect
 full_status_interval_s = 300     # ...and this often
@@ -25,7 +25,7 @@ full_status_interval_s = 300     # ...and this often
 # Each setting has a minimum (shown below); a smaller number in this file is raised to it.
 enabled = true
 interval_s = 60            # printing printers (minimum 15)
-idle_interval_s = 300      # open printers, plus one photo right after each print ends (minimum 60)
+idle_interval_s = 600      # open printers, plus one photo right after each print ends (minimum 60)
 watch_interval_s = 4       # while someone has a printer's details open (minimum 3)
 watch_max = 6              # how many printers can be on that fast refresh at once (1 to 20)
 # Printer lights, for clearer photos. "auto": on while a printer prints (and 30 s after, for the
