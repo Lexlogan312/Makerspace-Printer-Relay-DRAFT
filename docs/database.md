@@ -19,7 +19,7 @@ All tables live in Supabase's `public` schema. The migrations in `sql/` create e
 | `printer_events` | relay | admins | Each online/offline change, `gcode_state` change, and new error |
 | `relay_heartbeats` | relay | admins | One row per minute the relay is running and can reach Supabase |
 | `admins` | you, in the SQL editor | nobody (`is_admin()` checks it) | Which signed-in users are admins |
-| Storage bucket `printer-snapshots` | relay | everyone (public bucket, no listing) | `<printer id>.jpg`: the latest camera photo of each printing printer, replaced each minute. The dashboard adds `?v=<snapshot_at>` so a new photo never shows a cached old one |
+| Storage bucket `printer-snapshots` | relay | everyone (public bucket, no listing) | `<printer id>.jpg`: the latest camera photo of each printing printer, replaced each minute while someone has the board's Photos switch on, otherwise every 10 minutes. The dashboard adds `?v=<snapshot_at>` so a new photo never shows a cached old one |
 
 ### Adding a printer
 

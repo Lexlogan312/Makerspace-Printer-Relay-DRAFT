@@ -25,7 +25,10 @@ EXTERNAL_SPOOL = 254
 # second while printing, and the layer number ticks constantly. They still go out with any real
 # change and with the once-a-minute refresh. (Each push is a Supabase request, and every request
 # is a log entry; log volume is limited.)
-VOLATILE_FIELDS = {"last_seen", "estimated_completion", "wifi_signal", "nozzle_temp", "bed_temp", "layer_current"}
+# A new camera photo (snapshot_at) is volatile too: it rides along with the next push, except while
+# someone is watching that printer (the relay pushes it right away then; see Relay._push_status).
+VOLATILE_FIELDS = {"last_seen", "estimated_completion", "wifi_signal", "nozzle_temp", "bed_temp", "layer_current",
+                   "snapshot_at"}
 
 
 def _int(value) -> int | None:
@@ -122,10 +125,18 @@ def build_status(printer: Printer, state: dict, connected: bool,
     }
 
 
+# Progress and time left change about once a minute on every printing printer. The dashboard counts
+# the time down by itself between updates, so these ride along with the once-a-minute refresh (one
+# request for every printer) instead of each sending its own. Only appearing or disappearing counts
+# as a change, so a new print's first estimate goes out at once.
+PROGRESS_FIELDS = {"progress_percent", "remaining_minutes"}
+
+
 def fingerprint(record: dict) -> tuple:
     """Hashable form of a record's meaningful fields, for detecting changes."""
     return tuple(
-        (k, repr(v)) for k, v in sorted(record.items()) if k not in VOLATILE_FIELDS
+        (k, v is None) if k in PROGRESS_FIELDS else (k, repr(v))
+        for k, v in sorted(record.items()) if k not in VOLATILE_FIELDS
     )
 
 

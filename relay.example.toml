@@ -24,8 +24,8 @@ full_status_interval_s = 300     # ...and this often
 # On unless set to false. Needs sql/07 (and sql/08 for the fast refresh).
 # Each setting has a minimum (shown below); a smaller number in this file is raised to it.
 enabled = true
-interval_s = 60            # printing printers (minimum 15)
-idle_interval_s = 600      # open printers, plus one photo right after each print ends (minimum 60)
+interval_s = 60            # printing printers, while someone has the board's Photos switch on (minimum 15)
+idle_interval_s = 600      # open printers, printing ones while nobody has Photos on, and one right after each print ends (minimum 60)
 watch_interval_s = 4       # while someone has a printer's details open (minimum 3)
 watch_max = 6              # how many printers can be on that fast refresh at once (1 to 20)
 # Printer lights, for clearer photos. "auto": on while a printer prints (and 30 s after, for the

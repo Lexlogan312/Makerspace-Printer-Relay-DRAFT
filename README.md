@@ -29,7 +29,8 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
    (update the relay before running 06),
    [sql/07_camera_snapshots.sql](sql/07_camera_snapshots.sql),
    [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql),
-   [sql/09_remove_camera_watch.sql](sql/09_remove_camera_watch.sql) (08 is superseded; 09 removes what it added).
+   [sql/09_remove_camera_watch.sql](sql/09_remove_camera_watch.sql) (08 is superseded; 09 removes what it added),
+   [sql/10_staff_realtime.sql](sql/10_staff_realtime.sql) (live updates for the staff pages).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:
@@ -69,9 +70,13 @@ stops or changes a print. `uv run python -m relay.light --all` checks that every
 
 It needs `sql/07_camera_snapshots.sql`; until that's run, the log says so once and everything else
 carries on. Who's watching comes from Supabase Realtime Presence (channel `camera-watch`): the
-dashboard joins it while a printer is open and the relay listens, so nothing polls the database. Each photo replaces the printer's last one
+dashboard joins it while a printer is open, or while the board's Photos switch is on, and the relay
+listens, so nothing polls the database. Printing printers are photographed every minute only while
+someone has Photos on; otherwise every `idle_interval_s`, like open ones. Each photo replaces the printer's last one
 in the public Supabase Storage bucket `printer-snapshots`, and `printer_status.snapshot_at`
-says when it was taken. The dashboard shows it to everyone, so students can check on their build.
+says when it was taken. That time goes out with the next status push rather than in a request of
+its own (within a minute; right away while someone is watching). The dashboard stops live view
+after 3 minutes, with a "Resume live view" button, so a forgotten tab doesn't keep downloading. The dashboard shows it to everyone, so students can check on their build.
 Only the relay can upload; nobody can list the bucket.
 
 A photo is one ~65 KB frame, so even the fast refresh is light on the hotspot (about 16 KB/s per

@@ -84,6 +84,10 @@ class Relay:
         self.gcode_states: dict[str, str | None] = {}        # printer id -> latest gcode_state (read by the camera thread)
         # Printer lights ([camera] light = "auto")
         self.camera: SnapshotWorker | None = None
+        # When each printer's latest camera photo was taken (set from the camera threads), and the
+        # value last sent in printer_status.snapshot_at.
+        self.snapshot_at: dict[str, str] = {}
+        self.snapshot_sent: dict[str, str | None] = {}
         self.light_modes: dict[str, str | None] = {}         # printer id -> "on"/"off" as last reported
         # Under systemd this is /var/lib/printer-relay (StateDirectory); run by hand, the current folder.
         self.light_state_path = light_state_path or Path(os.environ.get("STATE_DIRECTORY", ".")) / "light-state.json"
@@ -118,7 +122,8 @@ class Relay:
             self.camera = SnapshotWorker(self.db, self.camera_targets, printing_s=self.config.camera_interval_s,
                                          idle_s=self.config.camera_idle_interval_s,
                                          watch_s=self.config.camera_watch_interval_s,
-                                         watch_max=self.config.camera_watch_max, watched=presence.watching)
+                                         watch_max=self.config.camera_watch_max, watched=presence.watching,
+                                         on_photo=self._photo_taken, photos_wanted=presence.photos_wanted)
             self.camera.start(stop)
             if self.config.camera_light == "auto":
                 log.info("printer lights: on while printing or while someone watches")
@@ -208,6 +213,10 @@ class Relay:
             if old is None:
                 log.info("[%s] tracking printer %s", p.label, p.serial)
                 self.histories[pid] = PrinterHistory(pid, last_status.get(pid), open_jobs.get(pid))
+                taken = (last_status.get(pid) or {}).get("snapshot_at")
+                if taken:  # keep the photo the dashboard already has until there's a newer one
+                    self.snapshot_at.setdefault(pid, taken)
+                    self.snapshot_sent.setdefault(pid, taken)
             elif pid in self.conns:
                 if p.access_code != old.access_code:
                     log.info("[%s] connection settings changed, reconnecting", p.label)
@@ -227,6 +236,8 @@ class Relay:
         p = self.printers.pop(pid)
         log.info("[%s] %s, disconnecting", p.label, "deleted" if deleted else "retired")
         self._disconnect(pid)
+        self.snapshot_at.pop(pid, None)
+        self.snapshot_sent.pop(pid, None)
         history = self.histories.pop(pid, None)
         if deleted:
             # Its rows can't be saved any more (they'd point at a printer that no longer exists).
@@ -309,6 +320,7 @@ class Relay:
         now, wall = self.clock(), self.wall_clock()
         in_grace = now - self.started < STARTUP_GRACE_S
         candidates, to_send = [], []
+        watching = self.camera.watching if self.camera else set()
         for pid, p in self.printers.items():
             conn = self.conns.get(pid)
             snap = conn.snapshot() if conn else Snapshot()
@@ -325,11 +337,14 @@ class Relay:
                 continue  # don't flash "offline" while the relay is starting up
 
             record = build_status(p, snap.state, snap.connected, snap.last_message_at, wall)
+            record["snapshot_at"] = self.snapshot_at.get(pid)
             self.gcode_states[pid] = record["gcode_state"] if snap.connected else None
             self._record_history(p, record, wall)
             fp = fingerprint(record)
             sent = self.last_sent.get(pid)
             changed = sent is None or sent[0] != fp
+            if pid in watching and snap.connected and record["snapshot_at"] != self.snapshot_sent.get(pid):
+                changed = True  # someone is watching live: send the new photo now, not with the next refresh
             age = float("inf") if sent is None else now - sent[1]
             candidates.append((record, fp, changed, age))
 
@@ -351,12 +366,19 @@ class Relay:
         for record, fp, changed in to_send:
             pid = record["printer_id"]
             self.last_sent[pid] = (fp, now)
+            if record["online"]:
+                self.snapshot_sent[pid] = record["snapshot_at"]
             since = self.unsent_since.pop(pid, None)
             if changed and since is not None:
                 # From the first report after the previous push, so it's an upper bound.
                 self.latencies.append(max(0.0, done - since))
         for record, _, _ in to_send:
             self._update_filament(record)
+
+    def _photo_taken(self, printer_id: str, taken_at: str) -> None:
+        """A camera photo was uploaded (called from a camera thread). Its time goes out with the next
+        status push; a single dict assignment, so no lock is needed."""
+        self.snapshot_at[printer_id] = taken_at
 
     def _update_filament(self, record: dict) -> None:
         """Keep the printers table's loaded-filament columns current, in one write when any change.

@@ -76,9 +76,12 @@ def test_worker_uploads_each_target_and_one_failure_does_not_stop_the_rest(caplo
         return JPEG
 
     when = datetime(2026, 10, 9, 15, 0, tzinfo=timezone.utc)
-    worker = SnapshotWorker(db, lambda: targets, grab=grab, wall_clock=lambda: when)
+    photos = []
+    worker = SnapshotWorker(db, lambda: targets, grab=grab, wall_clock=lambda: when,
+                            on_photo=lambda pid, taken_at: photos.append((pid, taken_at)))
     assert worker.capture_all() == 1
     assert db.uploads == [("b", len(JPEG), "2026-10-09T15:00:00+00:00")]
+    assert photos == [("b", "2026-10-09T15:00:00+00:00")]  # the relay sends this with the next status push
 
     worker.capture_all()  # the same failure again isn't logged twice
     assert sum("camera snapshot failed" in r.message for r in caplog.records) == 1
@@ -122,10 +125,12 @@ class Clock:
     def __call__(self): return self.t
 
 
-def schedule(watched=(), watch_max=6):
+def schedule(watched=(), watch_max=6, photos=None):
     clock, targets = Clock(), {}
+    photos = photos if photos is not None else {"on": True}
     worker = SnapshotWorker(FakeDB(), lambda: list(targets.values()), printing_s=60, idle_s=300, watch_s=4,
-                            watch_max=watch_max, watched=lambda: set(watched), clock=clock)
+                            watch_max=watch_max, watched=lambda: set(watched), clock=clock,
+                            photos_wanted=lambda: photos["on"])
 
     def due():
         shots = [t.printer_id for t in worker.due()]
@@ -155,6 +160,22 @@ def test_printing_every_minute_open_every_five_and_once_right_after_a_print_ends
     assert due() == []
     clock.t = 300
     assert due() == ["o"]
+
+
+def test_printing_slows_to_the_open_schedule_while_nobody_has_photos_on():
+    photos = {"on": False}
+    worker, clock, targets, due = schedule(photos=photos)
+    targets["p"] = target("p", True)
+    assert due() == ["p"]
+    clock.t = 60
+    assert due() == []                   # nobody would see it
+    clock.t = 299
+    assert due() == []
+    clock.t = 300
+    assert due() == ["p"]
+    photos["on"] = True                  # someone turns Photos on: back to every minute
+    clock.t = 360
+    assert due() == ["p"]
 
 
 def test_watched_printers_refresh_every_few_seconds_up_to_a_limit():

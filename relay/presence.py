@@ -1,7 +1,8 @@
 """Who is watching which printer right now, from Supabase Realtime Presence.
 
 When someone opens a printer's details on the dashboard, their browser joins the Realtime channel
-"camera-watch" and tracks {"printer_id": ...}. Supabase removes them by itself when they close it,
+"camera-watch" and tracks {"printer_id": ...}; while the board's Photos switch is on, it tracks
+{"photos": true} (one entry per tab, holding both). Supabase removes them by itself when they close it,
 close the tab or lose connection. The relay listens on the same channel, so it knows instantly
 which printers are being watched, without asking the database every few seconds (each request
 is a Supabase log entry, and log volume is limited).
@@ -49,6 +50,9 @@ class PresenceState:
     def watched(self) -> set[str]:
         return {str(m["printer_id"]) for metas in self.entries.values() for m in metas if m.get("printer_id")}
 
+    def photos_on(self) -> bool:
+        return any(m.get("photos") for metas in self.entries.values() for m in metas)
+
 
 class PresenceWatcher:
     def __init__(self, supabase_url: str, key: str, channel: str = CHANNEL, connector=connect):
@@ -66,6 +70,12 @@ class PresenceWatcher:
         """Printer ids someone has open right now. Empty while disconnected."""
         with self._lock:
             return self.state.watched() if self.connected else set()
+
+    def photos_wanted(self) -> bool:
+        """Whether anyone has the board's Photos switch on. While disconnected we can't tell, so
+        assume yes: photos keep their regular schedule."""
+        with self._lock:
+            return self.state.photos_on() if self.connected else True
 
     def start(self, stop: threading.Event) -> None:
         threading.Thread(target=self.run, args=(stop,), name="presence", daemon=True).start()

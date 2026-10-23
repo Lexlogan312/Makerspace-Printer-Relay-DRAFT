@@ -56,3 +56,13 @@ def test_nobody_counts_as_watching_while_disconnected():
     w = PresenceWatcher("https://abc.supabase.co", "k")
     w.state.replace({"t1": {"metas": [meta("a", "P1")]}})
     assert w.watching() == set()               # not connected
+
+
+def test_photos_switch_from_any_tab_and_assumed_on_while_disconnected():
+    w = PresenceWatcher("https://abc.supabase.co", "k")
+    assert w.photos_wanted() is True                 # can't tell yet: keep the regular schedule
+    w.connected = True
+    w.state.replace({"t1": {"metas": [meta("a", "P1")]}})
+    assert w.photos_wanted() is False                # someone watching one printer isn't Photos on
+    w.state.apply_diff({"joins": {"t2": {"metas": [{"phx_ref": "b", "photos": True}]}}, "leaves": {}})
+    assert w.photos_wanted() is True

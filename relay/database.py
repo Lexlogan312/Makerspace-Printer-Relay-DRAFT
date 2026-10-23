@@ -53,6 +53,8 @@ def _status_row(r: dict) -> dict:
         "wifi_signal": r["wifi_signal"],
         "print_error": r["print_error"],
     })
+    if r.get("snapshot_at"):
+        row["snapshot_at"] = r["snapshot_at"]  # when the latest camera photo was taken
     return row
 
 
@@ -100,9 +102,14 @@ class Database:
         return printers
 
     def load_last_status(self, printer_ids: list[str]) -> dict[str, dict]:
-        rows = self._request("GET", "printer_status", params={
-            "select": "printer_id,gcode_state,is_online,print_error,last_seen", "printer_id": _in(printer_ids),
-        })
+        columns = "printer_id,gcode_state,is_online,print_error,last_seen"
+        try:
+            rows = self._request("GET", "printer_status", params={
+                "select": columns + ",snapshot_at", "printer_id": _in(printer_ids)})
+        except DatabaseError as e:
+            if "snapshot_at" not in str(e):  # the column comes from migration 07
+                raise
+            rows = self._request("GET", "printer_status", params={"select": columns, "printer_id": _in(printer_ids)})
         return {r["printer_id"]: r for r in rows}
 
     def load_open_jobs(self, printer_ids: list[str]) -> dict[str, dict]:
@@ -125,7 +132,15 @@ class Database:
             row = _status_row(r)
             groups.setdefault(frozenset(row), []).append(row)
         for rows in groups.values():
-            self._upsert("printer_status", rows, on_conflict="printer_id")
+            try:
+                self._upsert("printer_status", rows, on_conflict="printer_id")
+            except DatabaseError as e:
+                # No snapshot_at column (migration 07 not run): keep status flowing without it.
+                if "snapshot_at" not in str(e) or not any("snapshot_at" in row for row in rows):
+                    raise
+                log.warning(NEEDS_SNAPSHOT_SETUP)
+                self._upsert("printer_status", [{k: v for k, v in row.items() if k != "snapshot_at"} for row in rows],
+                             on_conflict="printer_id")
 
     def update_printer(self, printer_id: str, fields: dict) -> None:
         self._request("PATCH", "printers", params={"id": f"eq.{printer_id}"}, json=fields,
@@ -154,8 +169,9 @@ class Database:
                           headers={"Prefer": "return=minimal"})
 
     def upload_snapshot(self, printer_id: str, jpeg: bytes, taken_at: str) -> None:
-        """Replace the printer's camera snapshot (one file per printer, so storage never grows),
-        then record when it was taken so the dashboard knows it's fresh."""
+        """Replace the printer's camera snapshot (one file per printer, so storage never grows).
+        When it was taken goes out with the next status push (printer_status.snapshot_at), not in a
+        request of its own."""
         url = f"{self.storage}/object/{SNAPSHOT_BUCKET}/{printer_id}.jpg"
         try:
             resp = self.session.post(url, data=jpeg, timeout=self.timeout, headers={
@@ -170,13 +186,6 @@ class Database:
                 raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=resp.status_code)
             raise DatabaseError(f"Supabase Storage upload failed ({resp.status_code}): {resp.text[:300]}",
                                 status=resp.status_code)
-        try:
-            self._request("PATCH", "printer_status", params={"printer_id": f"eq.{printer_id}"},
-                          json={"snapshot_at": taken_at}, headers={"Prefer": "return=minimal"})
-        except DatabaseError as e:
-            if "snapshot_at" in str(e):  # the column comes from migration 07
-                raise DatabaseError(NEEDS_SNAPSHOT_SETUP, status=e.status) from e
-            raise
 
     # used by import_printers.py
 

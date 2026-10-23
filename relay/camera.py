@@ -137,7 +137,8 @@ class SnapshotWorker:
     """Keeps each printer's photo about as fresh as it's useful to be, on background threads so a
     slow camera never holds up status updates. Each photo replaces the printer's previous one.
 
-    - printing: every `printing_s` (default 60 s)
+    - printing: every `printing_s` (default 60 s) while anyone has the board's Photos switch on,
+      otherwise every `idle_s`: nobody sees those photos until someone looks
     - open (idle or finished): every `idle_s` (default 10 min), plus one right after a print ends,
       so people can see whether the last print is still on the plate
     - someone has its details open on the dashboard: every `watch_s` (default 4 s), for at most
@@ -148,6 +149,8 @@ class SnapshotWorker:
     def __init__(self, db, targets: Callable[[], list[CameraTarget]], *, printing_s: float = 60.0,
                  idle_s: float = 600.0, watch_s: float = 4.0, watch_max: int = 6, workers: int | None = None,
                  watched: Callable[[], set[str]] | None = None,
+                 on_photo: Callable[[str, str], None] | None = None,
+                 photos_wanted: Callable[[], bool] | None = None,
                  grab: Callable[[str, str], bytes] = grab_frame,
                  wall_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  clock: Callable[[], float] = time.monotonic):
@@ -155,6 +158,8 @@ class SnapshotWorker:
         self.targets = targets          # printers worth photographing right now (from the relay)
         self.printing_s, self.idle_s, self.watch_s, self.watch_max = printing_s, idle_s, watch_s, watch_max
         self.watched = watched or (lambda: set())   # printer ids someone is looking at
+        self.photos_wanted = photos_wanted or (lambda: True)  # anyone has the board's Photos switch on
+        self.on_photo = on_photo or (lambda printer_id, taken_at: None)  # the relay sends taken_at with status
         self.grab = grab                # swapped for a fake in tests
         self.wall_clock = wall_clock
         self.clock = clock
@@ -178,8 +183,9 @@ class SnapshotWorker:
         threading.Thread(target=self.run, args=(stop,), name="camera", daemon=True).start()
 
     def run(self, stop: threading.Event) -> None:
-        log.info("camera photos on: printing every %.0f s, open every %.0f s, every %.0f s while someone watches",
-                 self.printing_s, self.idle_s, self.watch_s)
+        log.info("camera photos on: printing every %.0f s while someone has Photos on (otherwise every %.0f s), "
+                 "open every %.0f s, every %.0f s while someone watches",
+                 self.printing_s, max(self.printing_s, self.idle_s), self.idle_s, self.watch_s)
         with ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="camera") as pool:
             while not stop.is_set():
                 for t in self.due():
@@ -190,12 +196,13 @@ class SnapshotWorker:
         """Targets whose next photo is due now. Marks them in flight."""
         now = self.clock()
         watching = self._refresh_watching(now)
+        printing_s = self.printing_s if self.photos_wanted() else max(self.printing_s, self.idle_s)
         out = []
         for t in self.targets():
             was = self._was_printing.get(t.printer_id)
             self._was_printing[t.printer_id] = t.printing
             just_finished = was is True and not t.printing
-            interval = self.watch_s if t.printer_id in watching else (self.printing_s if t.printing else self.idle_s)
+            interval = self.watch_s if t.printer_id in watching else (printing_s if t.printing else self.idle_s)
             last = self._last_shot.get(t.printer_id)
             with self._lock:
                 if t.printer_id in self._in_flight:
@@ -233,7 +240,9 @@ class SnapshotWorker:
     def capture(self, t: CameraTarget) -> bool:
         try:
             jpeg = self.grab(t.host, t.access_code)
-            self.db.upload_snapshot(t.printer_id, jpeg, self.wall_clock().isoformat(timespec="seconds"))
+            taken_at = self.wall_clock().isoformat(timespec="seconds")
+            self.db.upload_snapshot(t.printer_id, jpeg, taken_at)
+            self.on_photo(t.printer_id, taken_at)
         except Exception as e:  # a camera or upload problem must never stop the other printers
             message = str(e)
             if "sql/07" in message:  # a setup problem, the same for every printer: say it once

@@ -311,3 +311,65 @@ def test_connection_problem_messages():
     assert connection_problem(down, True, True) == "Access code rejected."
     assert connection_problem(Snapshot(), False, None).startswith("No IP address yet")
     assert connection_problem(Snapshot(), True, None) == "Connecting…"
+
+
+def test_photo_time_rides_along_unless_someone_is_watching():
+    relay, db, disc, clock = make_relay()
+    relay.tick()
+    conn = FakeConnection.created[0]
+    conn.report(state("RUNNING"), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    pushes = len(db.written("upsert_status"))
+
+    # A routine photo: no request of its own, it goes out with the next refresh.
+    relay._photo_taken(PRINTER.id, "2026-10-02T14:00:45+00:00")
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes
+    clock.advance(60)
+    relay.tick()
+    (records,) = db.written("upsert_status")[-1]
+    assert records[0]["snapshot_at"] == "2026-10-02T14:00:45+00:00"
+
+    # Someone has the printer open: each new photo is sent on the next pass.
+    relay.camera = type("Camera", (), {"watching": {PRINTER.id}})()
+    pushes = len(db.written("upsert_status"))
+    relay._photo_taken(PRINTER.id, "2026-10-02T14:01:50+00:00")
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes + 1
+    (records,) = db.written("upsert_status")[-1]
+    assert records[0]["snapshot_at"] == "2026-10-02T14:01:50+00:00"
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes + 1  # same photo: nothing more to send
+
+
+def test_progress_and_time_left_ride_along_but_a_new_estimate_goes_out_at_once():
+    relay, db, disc, clock = make_relay()
+    relay.tick()
+    conn = FakeConnection.created[0]
+    conn.report(state("RUNNING", mc_percent=10, mc_remaining_time=None), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    pushes = len(db.written("upsert_status"))
+
+    conn.report(state("RUNNING", mc_percent=10, mc_remaining_time=90), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes + 1      # the first estimate: sent now
+
+    conn.report(state("RUNNING", mc_percent=11, mc_remaining_time=89), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    assert len(db.written("upsert_status")) == pushes + 1      # a minute ticking down: waits
+    clock.advance(60)
+    relay.tick()
+    (records,) = db.written("upsert_status")[-1]
+    assert records[0]["remaining_minutes"] == 89 and records[0]["progress_percent"] == 11
+
+    conn.report(state("PAUSE", mc_percent=11, mc_remaining_time=89), clock.wall.timestamp())
+    clock.advance(2)
+    relay.tick()
+    assert db.written("upsert_status")[-1][0][0]["status"] == "paused"  # a state change: sent now
