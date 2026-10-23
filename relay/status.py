@@ -143,15 +143,15 @@ def fingerprint(record: dict) -> tuple:
 # Elegoo PLA colors, the filament the makerspace stocks (hex values from Elegoo's store).
 # Analytics groups jobs by these names.
 FILAMENT_COLORS = {
-    "Black": "#000000", "White": "#FFFFFF", "Grey": "#8F949B", "Space Grey": "#7E7E7E",
+    "Black": "#000000", "White": "#FFFFFF", "Gray": "#8F949B", "Space Gray": "#7E7E7E",
     "Translucent": "#FDFCF1", "Red": "#EA140E", "Orange": "#FD7C18", "Yellow": "#FBEC07",
     "Neon Green": "#08E327", "Sea Green": "#08B690", "Sky Blue": "#32D0EC", "Dark Blue": "#2240AF",
     "Purple": "#603BA0", "Pink": "#F9B0BD", "Brown": "#9E6A4B", "Copper Filled": "#895837",
     "Wood Color": "#B19870", "Beige": "#F4E0B8",
 }
 # Only used on an exact match, so e.g. an off-white isn't called "Translucent" and
-# greys don't split between two near-identical names.
-EXACT_ONLY = {"Translucent", "Copper Filled", "Space Grey"}
+# grays don't split between two near-identical names.
+EXACT_ONLY = {"Translucent", "Copper Filled", "Space Gray"}
 
 # Hue bands on the color wheel (degrees) for colorful filament, checked in order.
 HUE_FAMILIES = [(15, "red"), (45, "orange"), (70, "yellow"), (170, "green"), (200, "light blue"),
@@ -174,8 +174,8 @@ def color_family(rgb: tuple[int, int, int]) -> str:
     hue *= 360
     if val < 0.18:
         return "black"
-    if sat < 0.15:  # hardly any color: white, grey or black
-        return "white" if val > 0.9 else "grey" if val > 0.3 else "black"
+    if sat < 0.15:  # hardly any color: white, gray or black
+        return "white" if val > 0.9 else "gray" if val > 0.3 else "black"
     if 15 <= hue < 60 and sat < 0.4 and val > 0.6:
         return "beige"   # pale or tan orange/yellow
     if 10 <= hue < 45 and val < 0.65:

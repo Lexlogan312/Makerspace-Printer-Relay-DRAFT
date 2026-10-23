@@ -8,7 +8,7 @@ which printers are being watched, without asking the database every few seconds 
 is a Supabase log entry, and log volume is limited).
 
 This is a small client for the Realtime websocket protocol (Phoenix channels, JSON v1), so the
-reconnect behaviour is ours: if the connection drops, nobody counts as watching (photos fall back
+reconnect behavior is ours: if the connection drops, nobody counts as watching (photos fall back
 to their normal schedule) and it reconnects forever, backing off up to a minute.
 """
 

@@ -23,14 +23,15 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
    [sql/01_public_read.sql](sql/01_public_read.sql),
    [sql/02_admin_discovery_history.sql](sql/02_admin_discovery_history.sql),
    [sql/03_cleanup.sql](sql/03_cleanup.sql),
-   [sql/04_cancelled_prints.sql](sql/04_cancelled_prints.sql),
+   [sql/04_canceled_prints.sql](sql/04_canceled_prints.sql),
    [sql/05_printer_filament.sql](sql/05_printer_filament.sql),
    [sql/06_private_job_names_and_add_printer.sql](sql/06_private_job_names_and_add_printer.sql)
    (update the relay before running 06),
    [sql/07_camera_snapshots.sql](sql/07_camera_snapshots.sql),
    [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql),
    [sql/09_remove_camera_watch.sql](sql/09_remove_camera_watch.sql) (08 is superseded; 09 removes what it added),
-   [sql/10_staff_realtime.sql](sql/10_staff_realtime.sql) (live updates for the staff pages).
+   [sql/10_staff_realtime.sql](sql/10_staff_realtime.sql) (live updates for the staff pages),
+   [sql/11_american_spelling.sql](sql/11_american_spelling.sql) (renames stored "cancelled" and "Grey" values; stop the relay first, see the file).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:
@@ -89,7 +90,7 @@ uv run python -m relay.camera --host 10.42.0.112 --code 12345678         # or by
 
 This needs to run on the printer network: on the Pi, or on a laptop joined to `MakerspacePrinters`.
 If it fails, the message says why (wrong access code, camera video turned off on the printer, …).
-A flat tan or grey blur means the protective film is still on the camera lens.
+A flat tan or gray blur means the protective film is still on the camera lens.
 
 To deploy on the Pi, see [docs/raspberry-pi-setup.md](docs/raspberry-pi-setup.md). The
 service and firewall files are in `deploy/`.

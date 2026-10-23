@@ -61,13 +61,13 @@ def test_other_colors_get_the_closest_elegoo_color_in_their_family():
         "#0A2989": "Dark Blue", "#000080": "Dark Blue", "#C12E1F": "Red", "#F4EE2A": "Yellow",
         "#00AE42": "Neon Green", "#22FF22": "Neon Green", "#5E43B7": "Purple", "#F55A74": "Pink",
         "#8BD5EE": "Sky Blue", "#9D432C": "Brown", "#E8D3A9": "Beige", "#B8A07A": "Wood Color",
-        "#8E9089": "Grey", "#F0F0F0": "White", "#1A1A1A": "Black",
+        "#8E9089": "Gray", "#F0F0F0": "White", "#1A1A1A": "Black",
     }
     assert {hex_: color_name(hex_) for hex_ in cases} == cases
 
 
 def test_specialty_colors_need_an_exact_match():
     assert color_name("#FDFCF2") == "White"      # not Translucent
-    assert color_name("#7E7E7F") == "Grey"       # not Space Grey
+    assert color_name("#7E7E7F") == "Gray"       # not Space Gray
     assert color_name("#895838") == "Brown"      # not Copper Filled
     assert color_name(None) is None and color_name("nope") is None

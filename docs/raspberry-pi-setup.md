@@ -48,7 +48,7 @@ Wherever "admin dashboard" appears below: until the dashboard is built, use Supa
 
 1. Open Raspberry Pi Imager → **Device:** Raspberry Pi 5 → **OS:** *Raspberry Pi OS (other) →
    Raspberry Pi OS Lite (64-bit)* → **Storage:** your SD card.
-2. Fill in the customisation settings. Imager 2 walks you through them; older versions show an
+2. Fill in the customization settings. Imager 2 walks you through them; older versions show an
    **Edit settings** button:
    - Hostname: `makerspace-relay`
    - Username and password: pick your own and write them down (they go in the handoff notes)

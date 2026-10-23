@@ -17,9 +17,9 @@ from .status import color_name
 
 ACTIVE_STATES = {"PREPARE", "SLICING", "RUNNING", "PAUSE"}
 END_OUTCOMES = {"FINISH": "finished", "FAILED": "failed"}  # leaving an active state any other way -> "unknown"
-# A cancelled print ends in FAILED with this error code ("0300-400C", the task was cancelled),
-# so it's recorded as "cancelled" and doesn't count as a failure.
-CANCELLED_ERROR = 0x0300400C
+# A canceled print ends in FAILED with this error code ("0300-400C", the task was canceled),
+# so it's recorded as "canceled" and doesn't count as a failure.
+CANCELED_ERROR = 0x0300400C
 
 # A printer offline this long with a print in progress probably lost power. Its job is closed
 # at the moment it went offline, so it can't count as "printing" forever. If the printer comes
@@ -114,8 +114,8 @@ class PrinterHistory:
             end = self.end_hint or ts  # end_hint only applies to the first report after a restart
             if not active:
                 outcome = END_OUTCOMES.get(state, "unknown")
-                if state == "FAILED" and record["print_error"] == CANCELLED_ERROR:
-                    outcome = "cancelled"
+                if state == "FAILED" and record["print_error"] == CANCELED_ERROR:
+                    outcome = "canceled"
                 rows.append(self._close(end, outcome, record["print_error"]))
             elif new_print:
                 # A different print is running, so the previous one ended while the relay wasn't watching

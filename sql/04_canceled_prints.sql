@@ -1,9 +1,10 @@
--- Record cancelled prints separately from failed ones.
+-- Record canceled prints separately from failed ones.
 -- Run once in the Supabase SQL editor, after 03_cleanup.sql. Safe to re-run.
 --
--- A print cancelled on the printer (or in Bambu Studio) ends in FAILED with error 0300-400C.
--- The relay now records those jobs as "cancelled", so they don't count as failures or as
--- printer errors in the reliability stats.
+-- A print canceled on the printer (or in Bambu Studio) ends in FAILED with error 0300-400C.
+-- The relay records those jobs as canceled, so they don't count as failures or as printer errors
+-- in the reliability stats. (This file stores the value as 'cancelled'; 11_american_spelling.sql
+-- renames it to 'canceled'. Run both, in order.)
 
 alter table public.print_jobs drop constraint if exists print_jobs_outcome_check;
 alter table public.print_jobs add constraint print_jobs_outcome_check
@@ -13,7 +14,7 @@ alter table public.print_jobs add constraint print_jobs_outcome_check
 update public.print_jobs set outcome = 'cancelled'
 where outcome = 'failed' and print_error = 50348044;  -- 0x0300400C = error 0300-400C
 
--- Adds a `cancelled` count (new columns have to go last when replacing a view).
+-- Adds a canceled count (new columns have to go last when replacing a view).
 create or replace view public.print_jobs_daily with (security_invoker = true) as
 select (j.started_at at time zone public.analytics_time_zone())::date as day,
        j.printer_id,
@@ -56,7 +57,7 @@ offline as (
 errors as (
   select printer_id, (ts at time zone public.analytics_time_zone())::date as day, count(*) as errors
   from public.printer_events
-  where kind = 'error' and to_value <> '0300-400C'  -- a cancelled print isn't a printer problem
+  where kind = 'error' and to_value <> '0300-400C'  -- a canceled print isn't a printer problem
   group by 1, 2
 )
 select coalesce(o.day, e.day) as day,
