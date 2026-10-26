@@ -17,6 +17,7 @@ from .config import Printer
 log = logging.getLogger(__name__)
 
 MQTT_PORT = 8883  # Bambu printers' local MQTT broker (TLS)
+KEEPALIVE_S = 10
 
 # Asks for a full status report. This doesn't control the printer.
 PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall"}}
@@ -114,7 +115,10 @@ class PrinterConnection:
 
     def start(self) -> None:
         log.info("[%s] connecting to %s", self.label, self.host)
-        self._client.connect_async(self.host, MQTT_PORT, keepalive=60)
+        # A printer that loses power or Wi-Fi just goes quiet. With a 10 s keepalive the client pings it
+        # after 10 s of silence and gives up 10 s later, so the board shows it offline within about
+        # 20-25 s. The pings stay on the makerspace network: no Supabase requests.
+        self._client.connect_async(self.host, MQTT_PORT, keepalive=KEEPALIVE_S)
         self._client.loop_start()  # background thread, reconnects automatically
 
     def stop(self) -> None:
