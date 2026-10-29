@@ -31,7 +31,8 @@ printers ──MQTT──▶ relay (Pi) ──REST──▶ Supabase ◀── d
    [sql/08_camera_live_view.sql](sql/08_camera_live_view.sql),
    [sql/09_remove_camera_watch.sql](sql/09_remove_camera_watch.sql) (08 is superseded; 09 removes what it added),
    [sql/10_staff_realtime.sql](sql/10_staff_realtime.sql) (live updates for the staff pages),
-   [sql/11_american_spelling.sql](sql/11_american_spelling.sql) (renames stored "cancelled" and "Grey" values; stop the relay first, see the file).
+   [sql/11_american_spelling.sql](sql/11_american_spelling.sql) (renames stored "cancelled" and "Grey" values; stop the relay first, see the file),
+   [sql/12_reserved_and_file_names.sql](sql/12_reserved_and_file_names.sql) (Reserved status with a note, and file names on the board; run it before updating the relay).
 2. **Admins.** Create each admin under *Authentication → Users*, then run
    `insert into public.admins (user_id) values ('<their user id>');`
 3. **Config.** Copy the template and fill in the Supabase URL and **secret** key:

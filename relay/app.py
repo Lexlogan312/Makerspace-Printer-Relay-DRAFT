@@ -418,7 +418,7 @@ class Relay:
         for pid, p in list(self.printers.items()):
             conn = self.conns.get(pid)
             state = self.gcode_states.get(pid)
-            if conn and state and p.maintenance_status == "operational":
+            if conn and state and p.in_use:
                 targets.append(CameraTarget(pid, p.label, conn.host, p.access_code, printing=state in PRINTING_STATES))
         return targets
 
@@ -440,7 +440,7 @@ class Relay:
             if self.was_printing.get(pid) and not printing:
                 self.light_hold_until[pid] = now + LIGHT_END_HOLD_S
             self.was_printing[pid] = printing
-            want = p.maintenance_status == "operational" and (
+            want = p.in_use and (
                 printing or pid in watching or now < self.light_hold_until.get(pid, 0.0))
             sent = self.light_sent.get(pid)
             waiting = sent is not None and now - sent[1] < LIGHT_RETRY_S

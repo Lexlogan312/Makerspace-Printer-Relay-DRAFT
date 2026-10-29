@@ -60,7 +60,7 @@ def test_offline_status_row_only_flags_offline():
     online = next(r for r in rows if r["is_online"])
     offline = next(r for r in rows if not r["is_online"])
     assert online["gcode_state"] == "RUNNING" and online["print_error"] == 0
-    assert "subtask_name" not in online  # job names never go in the public table
+    assert "subtask_name" not in online and "job_name" in online  # the file name goes in job_name (sql/12)
     assert set(offline) == {"printer_id", "is_online", "last_seen"}  # last job data is left alone
 
 
@@ -101,3 +101,47 @@ def test_config_reads_printer_network_and_env_override(tmp_path, monkeypatch):
     config = load_config(path)
     assert config.supabase_key == "sb_secret_env"
     assert str(config.printer_network) == "10.42.0.0/24"
+
+
+def test_status_sends_the_file_name_and_clears_it_when_idle():
+    db = make_db()
+    db.upsert_status([record("RUNNING", subtask_name="bracket_v3.gcode.3mf")])
+    db.upsert_status([record("IDLE", subtask_name="")])
+    printing, idle = (call[2]["json"][0] for call in db.session.calls)
+    assert printing["job_name"] == "bracket_v3.gcode.3mf"
+    assert "job_name" in idle and idle["job_name"] is None   # sent as empty, so the old name goes away
+
+
+class MissingColumnSession(FakeSession):
+    """Rejects any upsert that still has the named column, the way PostgREST does before the
+    migration that adds it (its error text names the column)."""
+
+    def __init__(self, column):
+        super().__init__()
+        self.column = column
+
+    def request(self, method, url, **kw):
+        self.calls.append((method, url.rsplit("/", 1)[1], kw))
+        if any(self.column in row for row in kw.get("json") or []):
+            response = FakeResponse(status=400)
+            response.text = f"Could not find the '{self.column}' column of 'printer_status'"
+            return response
+        return self.response
+
+
+def test_status_keeps_flowing_without_a_missing_optional_column(caplog):
+    db = make_db()
+    db.session = MissingColumnSession("job_name")
+    db.upsert_status([record("RUNNING")])
+    db.upsert_status([record("RUNNING")])
+    sent = [c[2]["json"][0] for c in db.session.calls]
+    assert "job_name" not in sent[-1] and sent[-1]["is_online"] is True
+    assert sum("sql/12" in r.message for r in caplog.records) == 1   # said once, not on every push
+
+
+def test_reserved_printers_stay_in_use_but_out_of_service_ones_do_not():
+    import dataclasses
+    from tests.fixtures import PRINTER
+    use = {s: dataclasses.replace(PRINTER, maintenance_status=s).in_use
+           for s in ("operational", "reserved", "maintenance", "offline_permanent")}
+    assert use == {"operational": True, "reserved": True, "maintenance": False, "offline_permanent": False}

@@ -27,6 +27,12 @@ class Printer:
     def retired(self) -> bool:
         return self.maintenance_status == "offline_permanent"
 
+    @property
+    def in_use(self) -> bool:
+        """In service, or reserved (say, for a class): it prints, so photos and lights carry on.
+        Out of service ("maintenance") and retired printers are left alone."""
+        return self.maintenance_status in ("operational", "reserved")
+
 
 @dataclass(frozen=True)
 class RelayConfig:

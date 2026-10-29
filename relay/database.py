@@ -53,6 +53,9 @@ def _status_row(r: dict) -> dict:
         "wifi_signal": r["wifi_signal"],
         "print_error": r["print_error"],
     })
+    # The print's file name is shown on the public board (the technician asked for it; see
+    # sql/12). Sent even when empty, so a finished print's name is cleared.
+    row["job_name"] = r.get("job_name")
     if r.get("snapshot_at"):
         row["snapshot_at"] = r["snapshot_at"]  # when the latest camera photo was taken
     return row
@@ -60,6 +63,9 @@ def _status_row(r: dict) -> dict:
 
 SNAPSHOT_BUCKET = "printer-snapshots"
 NEEDS_SNAPSHOT_SETUP = "camera photos need sql/07_camera_snapshots.sql: run it once in the Supabase SQL editor"
+NEEDS_JOB_NAME_SETUP = "file names on the board need sql/12_reserved_and_file_names.sql: run it once in the Supabase SQL editor"
+# Columns added by later migrations: if one is missing, status keeps flowing without it.
+OPTIONAL_STATUS_COLUMNS = {"snapshot_at": NEEDS_SNAPSHOT_SETUP, "job_name": NEEDS_JOB_NAME_SETUP}
 
 
 class Database:
@@ -72,6 +78,7 @@ class Database:
         # Legacy service_role JWTs go in Authorization. The newer sb_secret_ keys only work in apikey.
         if not key.startswith("sb_"):
             self.session.headers["Authorization"] = f"Bearer {key}"
+        self._warned_missing: set[str] = set()  # optional status columns already reported missing
 
     def close(self) -> None:
         self.session.close()
@@ -132,15 +139,20 @@ class Database:
             row = _status_row(r)
             groups.setdefault(frozenset(row), []).append(row)
         for rows in groups.values():
-            try:
-                self._upsert("printer_status", rows, on_conflict="printer_id")
-            except DatabaseError as e:
-                # No snapshot_at column (migration 07 not run): keep status flowing without it.
-                if "snapshot_at" not in str(e) or not any("snapshot_at" in row for row in rows):
-                    raise
-                log.warning(NEEDS_SNAPSHOT_SETUP)
-                self._upsert("printer_status", [{k: v for k, v in row.items() if k != "snapshot_at"} for row in rows],
-                             on_conflict="printer_id")
+            self._upsert_status_rows(rows)
+
+    def _upsert_status_rows(self, rows: list[dict]) -> None:
+        try:
+            self._upsert("printer_status", rows, on_conflict="printer_id")
+        except DatabaseError as e:
+            # A column from a later migration is missing: say which, and send the rest without it.
+            missing = next((c for c in OPTIONAL_STATUS_COLUMNS if c in str(e) and any(c in row for row in rows)), None)
+            if missing is None:
+                raise
+            if missing not in self._warned_missing:
+                self._warned_missing.add(missing)
+                log.warning(OPTIONAL_STATUS_COLUMNS[missing])
+            self._upsert_status_rows([{k: v for k, v in row.items() if k != missing} for row in rows])
 
     def update_printer(self, printer_id: str, fields: dict) -> None:
         self._request("PATCH", "printers", params={"id": f"eq.{printer_id}"}, json=fields,

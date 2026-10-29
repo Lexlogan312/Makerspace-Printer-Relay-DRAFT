@@ -11,9 +11,9 @@ All tables live in Supabase's `public` schema. The migrations in `sql/` create e
 
 | Table | Written by | Read by | What it holds |
 |---|---|---|---|
-| `printers` | admins, plus relay for `filament_color`, `filament_color_name`, `filament_type`, `model`, `firmware_version` | everyone | One row per printer: serial, label, model, `maintenance_status`, and the loaded filament (hex color, Elegoo color name, type) |
+| `printers` | admins, plus relay for `filament_color`, `filament_color_name`, `filament_type`, `model`, `firmware_version` | everyone | One row per printer: serial, label, model, `maintenance_status` (`operational`, `reserved`, `maintenance` = out of service, `offline_permanent` = retired), `status_note` (shown to students with Reserved or Out of service), and the loaded filament (hex color, Elegoo color name, type) |
 | `printer_connections` | admins (`access_code`), relay (`host`, `last_error`) | admins | How to connect. Separate from `printers` because access codes must not be public |
-| `printer_status` | relay | everyone | Live state, one row per printer (upserted). Never holds the job name: that can identify a student, so the current job is read from `print_jobs` (staff-only). `snapshot_at` is when the latest camera photo was taken |
+| `printer_status` | relay | everyone | Live state, one row per printer (upserted). `job_name` is the file name of the print in progress, shown on the public board at the technician's request (sql/12); the history in `print_jobs` stays staff-only. `snapshot_at` is when the latest camera photo was taken |
 | `discovered_printers` | relay | admins | Printers announcing themselves on the hotspot that aren't in `printers` yet |
 | `print_jobs` | relay | admins | One row per print: start/end, outcome, layers, filament. Admin-only because job names can identify students |
 | `printer_events` | relay | admins | Each online/offline change, `gcode_state` change, and new error |
