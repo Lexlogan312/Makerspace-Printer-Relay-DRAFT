@@ -3,7 +3,7 @@
 import dataclasses
 from datetime import datetime, timedelta, timezone
 
-from relay.app import Relay, STARTUP_GRACE_S, connection_problem
+from relay.app import Relay, STARTUP_GRACE_S, STUCK_RECONNECT_S, connection_problem
 from relay.config import RelayConfig
 from relay.database import DatabaseError
 from relay.discovery import Announcement
@@ -76,6 +76,9 @@ class FakeConnection:
 
     @property
     def is_connected(self): return self.snap.connected
+
+    @property
+    def error(self): return self.snap.error
 
     def report(self, st, at):
         self.snap = Snapshot(state=st, connected=True, last_message_at=at, first_unread_at=at)
@@ -373,3 +376,40 @@ def test_progress_and_time_left_ride_along_but_a_new_estimate_goes_out_at_once()
     clock.advance(2)
     relay.tick()
     assert db.written("upsert_status")[-1][0][0]["status"] == "paused"  # a state change: sent now
+
+
+def test_a_connection_stuck_on_connecting_is_started_again_while_the_printer_is_on_the_network():
+    relay, db, disc, clock = make_relay()
+    disc.announce(PRINTER.serial, "10.42.0.23")
+    relay.tick()
+    first = FakeConnection.created[-1]
+    clock.advance(STUCK_RECONNECT_S - 1)
+    relay.tick()
+    assert FakeConnection.created[-1] is first                 # still giving it time
+    clock.advance(2)
+    relay.tick()
+    second = FakeConnection.created[-1]
+    assert second is not first and first.stopped and second.started
+
+    # Once it's connected, nothing more happens.
+    second.report(state("IDLE"), clock.wall.timestamp())
+    clock.advance(STUCK_RECONNECT_S * 3)
+    relay.tick()
+    assert FakeConnection.created[-1] is second
+
+
+def test_no_fresh_connection_for_a_printer_off_the_network_or_with_a_rejected_code():
+    relay, db, disc, clock = make_relay()
+    disc.announce(PRINTER.serial, PRINTER.host)   # its stored address, so dropping off the network doesn't change it
+    relay.tick()
+    conn = FakeConnection.created[-1]
+    conn.snap = Snapshot(connected=False, error="Access code rejected. Check the access code shown on the printer's screen.")
+    clock.advance(STUCK_RECONNECT_S * 2)
+    relay.tick()
+    assert FakeConnection.created[-1] is conn                  # a new one would be refused too
+
+    conn.snap = Snapshot(connected=False)
+    disc.announcements.clear()                                 # powered off: not on the network
+    clock.advance(STUCK_RECONNECT_S * 2)
+    relay.tick()
+    assert FakeConnection.created[-1] is conn

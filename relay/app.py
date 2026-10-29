@@ -45,6 +45,10 @@ LIGHT_RETRY_S = 10       # wait this long for a light change to show up before d
 LIGHT_END_HOLD_S = 30    # keep the light on this long after a print ends, for the photo of the result
 
 
+# A printer that's on the network but still not connected after this long gets a fresh connection.
+STUCK_RECONNECT_S = 120.0
+
+
 def connection_problem(snap: Snapshot, has_host: bool, seen_on_network: bool | None) -> str | None:
     """Why a printer isn't connected, in words an admin can act on. None when it's connected.
 
@@ -75,6 +79,7 @@ class Relay:
         self.printers: dict[str, Printer] = {}          # printers being relayed, by id
         self.registered_serials: set[str] | None = None # every serial in the printers table (None until first sync)
         self.conns: dict[str, PrinterConnection] = {}
+        self.waiting_since: dict[str, float] = {}   # printer id -> since when its connection hasn't been up
         self.histories: dict[str, PrinterHistory] = {}
 
         self.last_sent: dict[str, tuple[tuple, float]] = {}  # printer id -> (fingerprint, time sent)
@@ -247,26 +252,44 @@ class Relay:
             row = history.close_open_job(self.wall_clock())
             if row:
                 self.pending_jobs[row["id"]] = row
-        for d in (self.last_sent, self.unsent_since, self.problems, self.gcode_states, self.light_modes,
+        for d in (self.last_sent, self.unsent_since, self.waiting_since, self.problems, self.gcode_states, self.light_modes,
                   self.light_sent, self.light_hold_until, self.was_printing):
             d.pop(pid, None)
 
     # 2. connections
 
     def _reconcile_connections(self) -> None:
-        """Connect each printer to its current IP, reconnecting if the IP changed."""
+        """Connect each printer to its current IP, reconnecting if the IP changed, or if the
+        connection hasn't got through for STUCK_RECONNECT_S while the printer is on the network."""
+        now = self.clock()
         for pid, p in self.printers.items():
             ann = self.discovery.get(p.serial)
             host = ann.ip if ann else self.written.get((pid, "host"), p.host)
             conn = self.conns.get(pid)
-            if host is None or (conn and conn.host == host):
+            if host is None:
                 continue
-            if conn:
+            if conn and conn.host == host:
+                if conn.is_connected:
+                    self.waiting_since.pop(pid, None)
+                    continue
+                since = self.waiting_since.setdefault(pid, now)
+                # Not connected for a while although the printer is on the network: the client
+                # should have got through by now, so it's stuck (it has been seen to sit on
+                # "Connecting…" until the relay was restarted). Start a fresh one for this printer.
+                # A rejected access code is left alone: a new connection would be refused too.
+                seen = ann is not None or not self.discovery.available
+                rejected = (getattr(conn, "error", None) or "").startswith("Access code rejected")
+                if now - since < STUCK_RECONNECT_S or not seen or rejected:
+                    continue
+                log.warning("[%s] not connected for %.0f s although it's on the network, reconnecting", p.label, now - since)
+                self._disconnect(pid)
+            elif conn:
                 log.warning("[%s] IP changed from %s to %s", p.label, conn.host, host)
                 self._disconnect(pid)
             conn = self.connection_factory(p, host, self.config.request_full_status, self.dump_dir)
             conn.start()
             self.conns[pid] = conn
+            self.waiting_since[pid] = now
 
     def _disconnect(self, pid: str) -> None:
         conn = self.conns.pop(pid, None)

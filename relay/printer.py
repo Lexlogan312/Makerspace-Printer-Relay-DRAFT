@@ -111,6 +111,12 @@ class PrinterConnection:
     def is_connected(self) -> bool:
         return self._connected
 
+    @property
+    def error(self) -> str | None:
+        """Why the connection isn't up, if the printer said (or couldn't be reached). None while
+        still waiting for an answer."""
+        return self._error
+
     # lifecycle
 
     def start(self) -> None:
